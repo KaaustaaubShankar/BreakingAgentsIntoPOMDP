@@ -60,7 +60,7 @@ class Arrangement:
             return desc + ", ".join(shape_descs[:-1]) + ", and " + shape_descs[-1] + "."
 
 
-class VisualZendoEnv:
+class LithicArrayEnv:
     def __init__(
         self,
         world: WorldAxis = WorldAxis.EASY,
@@ -108,7 +108,7 @@ class VisualZendoEnv:
         presentation = {
             "instruction": self._get_goal_instruction(),
             "mechanics": self._get_mechanics_instruction(),
-            "initial_examples": [self._format_arrangement(arr, label) for arr, label in initial_examples]
+            "initial_examples": [self._format_arrangement(arr, label, filename=f"initial_{int(time.time())}_{i}.png") for i, (arr, label) in enumerate(initial_examples)]
         }
         
         self._log_event("initial_presentation", presentation)
@@ -116,7 +116,7 @@ class VisualZendoEnv:
 
     def _get_goal_instruction(self):
         if self.goal == GoalAxis.EASY:
-            return "Your goal is to discover the hidden rule that classifies arrangements as Harmonious or Discordant. State the rule explicitly to win."
+            return "Your goal is to discover the hidden rule that classifies arrangements as Quartz or Shale. State the rule explicitly to win."
         elif self.goal == GoalAxis.MEDIUM:
             return "There is a pattern here. Figure it out."
         else: # HARD
@@ -124,14 +124,34 @@ class VisualZendoEnv:
 
     def _get_mechanics_instruction(self):
         if self.mechanics == MechanicsAxis.EASY:
-            return "You may query arrangements via Mondo (submit arrangement + predicted classification). Matches earn 1 token. You can spend tokens to propose a rule. The Master provides counter-examples on failed proposals."
+            return """You may query arrangements via Strata (submit arrangement + predicted classification). Matches earn 1 token. You can spend tokens to propose a rule. The Basalt provides counter-examples on failed proposals.
+
+You must respond with only a JSON block containing your action. Do not include markdown or other text outside the JSON.
+Strata Action Schema:
+{
+  "action": "STRATA",
+  "arrangement": [{"color": "red", "size": "small", "type_": "circle"}],
+  "prediction": true  // true for Quartz, false for Shale
+}
+
+Propose Action Schema (Requires 1 token):
+{
+  "action": "PROPOSE",
+  "rule_description": "All pieces are red",
+  "rule_code": "def agent_eval_fn(arr):\n    # arr is an Arrangement obj. You can access shapes via arr.shapes. Each shape has .color, .size, .type_\n    return all(s.color == 'red' for s in arr.shapes)"
+}"""
         elif self.mechanics == MechanicsAxis.MEDIUM:
-            return "You can query arrangements or propose a rule."
+            return """You can query arrangements or propose a rule.
+
+You must respond with only a JSON block containing your action. Do not include markdown or other text.
+Action Schemas:
+STRATA: {"action": "STRATA", "arrangement": [{"color": "red", "size": "small", "type_": "circle"}], "prediction": true}
+PROPOSE: {"action": "PROPOSE", "rule_description": "...", "rule_code": "def agent_eval_fn(arr): ..."}"""
         else: # HARD
-            return ""
+            return "Respond with a JSON object containing your action ('STRATA' or 'PROPOSE')."
 
     def _format_arrangement(self, arrangement: Arrangement, label: Optional[bool] = None, filename: str = None) -> Dict[str, Any]:
-        result = {}
+        result: Dict[str, Any] = {}
         if self.world == WorldAxis.EASY:
             result["representation"] = arrangement.to_json_dict()
         elif self.world == WorldAxis.MEDIUM:
@@ -145,7 +165,7 @@ class VisualZendoEnv:
                 result["representation"] = "Image format requested but PIL not available or filename not provided (fallback to JSON: " + str(arrangement.to_json_dict()) + ")"
                 
         if label is not None:
-            result["label"] = "Harmonious" if label else "Discordant"
+            result["label"] = "Quartz" if label else "Shale"
         
         return result
 
@@ -181,10 +201,10 @@ class VisualZendoEnv:
             
         img.save(filepath)
 
-    def mondo(self, arrangement: Arrangement, predicted_harmonious: bool) -> Dict[str, Any]:
-        """Agent predicts if an arrangement is harmonious."""
-        true_harmonious = self.true_rule_eval_fn(arrangement)
-        match = (predicted_harmonious == true_harmonious)
+    def strata(self, arrangement: Arrangement, predicted_quartz: bool) -> Dict[str, Any]:
+        """Agent predicts if an arrangement is quartz."""
+        true_quartz = self.true_rule_eval_fn(arrangement)
+        match = (predicted_quartz == true_quartz)
         
         if match:
             self.tokens += 1
@@ -193,15 +213,15 @@ class VisualZendoEnv:
             feedback_msg = "Mismatch. No token earned."
         
         response = {
-            "correct_label": "Harmonious" if true_harmonious else "Discordant",
+            "correct_label": "Quartz" if true_quartz else "Shale",
             "feedback": feedback_msg,
             "tokens_current": self.tokens
         }
         
-        self._log_event("mondo_query", {
+        self._log_event("strata_query", {
             "arrangement": arrangement.to_json_dict(),
-            "predicted": predicted_harmonious,
-            "actual": true_harmonious,
+            "predicted": predicted_quartz,
+            "actual": true_quartz,
             "match": match,
             "response": response
         })
@@ -211,14 +231,14 @@ class VisualZendoEnv:
     def propose_rule(self, proposed_rule: str, agent_eval_fn: Callable) -> Dict[str, Any]:
         """Agent spends 1 token to propose a rule."""
         if self.tokens < 1:
-            msg = "Insufficent tokens to propose a rule. Earn tokens via Mondo first."
+            msg = "Insufficent tokens to propose a rule. Earn tokens via Strata first."
             self._log_event("propose_rule_failed_tokens", {"proposed_rule": proposed_rule})
             return {"error": msg}
             
         self.tokens -= 1
         
-        # The Master generates a counter-example if the agent's proposed rule does not match the true rule.
-        # This requires the agent's evaluation function as input to test against the master's true rule.
+        # The Basalt generates a counter-example if the agent's proposed rule does not match the true rule.
+        # This requires the agent's evaluation function as input to test against the basalt's true rule.
         counter_example = self.counter_example_generator_fn(agent_eval_fn)
         
         if counter_example is None:
@@ -250,9 +270,9 @@ class VisualZendoEnv:
                 
                 response["counter_example"] = {
                     "arrangement": formatted_arr["representation"],
-                    "master_label": "Harmonious" if true_label else "Discordant",
-                    "your_rule_predicted": "Harmonious" if agent_label else "Discordant",
-                    "message": "This arrangement satisfies the Master's rule but not yours, or vice versa."
+                    "basalt_label": "Quartz" if true_label else "Shale",
+                    "your_rule_predicted": "Quartz" if agent_label else "Shale",
+                    "message": "This arrangement satisfies the Basalt's rule but not yours, or vice versa."
                 }
                 
             self._log_event("propose_rule_rejected", {"proposed_rule": proposed_rule, "response": response})

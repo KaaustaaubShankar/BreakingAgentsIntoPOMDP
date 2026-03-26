@@ -2,7 +2,7 @@ import json
 import os
 import argparse
 import re
-from visual_zendo import VisualZendoEnv, WorldAxis, GoalAxis, MechanicsAxis, FeedbackAxis, Arrangement, Shape
+from visual_zendo import LithicArrayEnv, WorldAxis, GoalAxis, MechanicsAxis, FeedbackAxis, Arrangement, Shape
 from rules import get_rule_by_index, generate_initial_examples, create_counter_example_generator, generate_random_arrangement
 
 try:
@@ -60,46 +60,31 @@ def parse_json_from_text(text: str) -> dict:
         print("Failed to decode JSON from LLM: ", text)
         raise e
 
-def run_llm_agent(provider: str, model: str, max_turns: int = 20, world: WorldAxis = WorldAxis.EASY, goal: GoalAxis = GoalAxis.EASY, mechanics: MechanicsAxis = MechanicsAxis.EASY, feedback: FeedbackAxis = FeedbackAxis.EASY):
+def run_llm_agent(provider: str, model: str, max_turns: int = 20, world: WorldAxis = WorldAxis.EASY, goal: GoalAxis = GoalAxis.EASY, mechanics: MechanicsAxis = MechanicsAxis.EASY, feedback: FeedbackAxis = FeedbackAxis.EASY, rule_index: int = 1):
     print(f"--- Starting LLM Agent ({provider} / {model}) ---")
     
     client = LLMClient(provider, model)
-    env = VisualZendoEnv(world=world, goal=goal, mechanics=mechanics, feedback=feedback)
+    env = LithicArrayEnv(world=world, goal=goal, mechanics=mechanics, feedback=feedback)
     
-    true_rule_name, true_rule_eval_fn = get_rule_by_index(1) # Default: "All pieces are the same color"
+    true_rule_name, true_rule_eval_fn = get_rule_by_index(rule_index)
     ce_generator = create_counter_example_generator(true_rule_eval_fn)
     initial_examples = generate_initial_examples(true_rule_eval_fn)
     
     presentation = env.reset(initial_examples, true_rule_name, true_rule_eval_fn, ce_generator)
     
-    system_prompt = f"""You are an inductive reasoning agent playing Visual Zendo.
-Your goal: {presentation['instruction']}
-Mechanics: {presentation['mechanics']}
+    system_prompt = f"""{presentation['instruction']}
+{presentation['mechanics']}
 
-Data structures:
-Arrangement is a list of Shapes. Each Shape is a dict: {{"color": str, "size": str, "type_": str}}.
-Valid colors: red, blue, green, yellow, black. Sizes: small, medium, large. Types: triangle, circle, square.
+Valid colors: red, blue, green, yellow, black. Sizes: small, medium, large. Types: triangle, circle, square."""
 
-You must respond with only a JSON block containing your action. Do not include markdown or other text outside the JSON.
-Mondo Action Schema:
-{{
-  "action": "MONDO",
-  "arrangement": [{{"color": "red", "size": "small", "type_": "circle"}}],
-  "prediction": true  // true for Harmonious, false for Discordant
-}}
-
-Propose Action Schema (Requires 1 token):
-{{
-  "action": "PROPOSE",
-  "rule_description": "All pieces are red",
-  "rule_code": "def agent_eval_fn(arr):\n    # arr is an Arrangement obj. You can access shapes via arr.shapes. Each shape has .color, .size, .type_\n    return all(s.color == 'red' for s in arr.shapes)"
-}}"""
-
-    history_log = f"Master Initialization:\nExamples: {json.dumps(presentation['initial_examples'], indent=2)}\n\n"
+    history_log = f"Basalt Initialization:\nExamples: {json.dumps(presentation['initial_examples'], indent=2)}\n\n"
     
+    turns_taken = 0
+    won = False
     for turn in range(max_turns):
-        print(f"\n--- Turn {turn+1} | Tokens: {env.tokens} ---")
-        prompt = f"Current Game State History:\n{history_log}\nChoose your next action (MONDO or PROPOSE)."
+        turns_taken = turn + 1
+        print(f"\n--- Turn {turns_taken} | Tokens: {env.tokens} ---")        
+        prompt = f"Current Game State History:\n{history_log}\nChoose your next action (STRATA or PROPOSE)."
         
         try:
             llm_response = client.generate(system_prompt, prompt)
@@ -112,13 +97,13 @@ Propose Action Schema (Requires 1 token):
             continue
             
         action = action_data.get("action")
-        if action == "MONDO":
+        if action == "STRATA":
             shapes_data = action_data.get("arrangement", [])
             pred = action_data.get("prediction", False)
             shapes = [Shape(**s) for s in shapes_data]
             arr = Arrangement(shapes=shapes)
-            res = env.mondo(arr, pred)
-            log = f"Action: MONDO | Predicted: {pred} | Arrangement: {shapes_data}\nResult: {res}"
+            res = env.strata(arr, pred)
+            log = f"Action: STRATA | Predicted: {pred} | Arrangement: {shapes_data}\nResult: {res}"
             print(log)
             history_log += log + "\n"
         elif action == "PROPOSE":
@@ -143,41 +128,61 @@ Propose Action Schema (Requires 1 token):
             
             if res.get("result") == "Accepted":
                 print("\nAgent won!!")
+                won = True
                 break
         else:
             log = f"System Error: Unrecognized action '{action}'"
             print(log)
             history_log += log + "\n"
             
+    print(f"\nGame Over. Turns taken: {turns_taken}")
+    
+    understanding_prompt = (
+        "The game has ended. Based on your experience playing, please explain your inferred understanding of:\n"
+        "1. The Goal of the game.\n"
+        "2. The Mechanics of the game.\n\n"
+        "Output ONLY a JSON block with exactly two keys: 'goal_understanding' (string) and 'mechanics_understanding' (string)."
+    )
+    print("--- Eliciting Agent Understanding ---")
+    try:
+        final_history = f"Current Game State History:\n{history_log}\n{understanding_prompt}"
+        resp = client.generate(system_prompt, final_history)
+        und_data = parse_json_from_text(resp)
+        print(f"Goal Understanding: {und_data.get('goal_understanding', '')}")
+        print(f"Mechanics Understanding: {und_data.get('mechanics_understanding', '')}")
+        env._log_event("agent_understanding", und_data)
+    except Exception as e:
+        print(f"Failed to get understanding: {e}")
+
     history_file = env.save_history()
     print(f"\nSaved history to {history_file}")
 
 
 def run_mock_agent(world: WorldAxis = WorldAxis.EASY, goal: GoalAxis = GoalAxis.EASY, mechanics: MechanicsAxis = MechanicsAxis.EASY, feedback: FeedbackAxis = FeedbackAxis.EASY):
     print("--- Starting Mock Test Agent ---")
-    env = VisualZendoEnv(world=world, goal=goal, mechanics=mechanics, feedback=feedback)
+    env = LithicArrayEnv(world=world, goal=goal, mechanics=mechanics, feedback=feedback)
     true_rule_name, true_rule_eval_fn = get_rule_by_index(1)
     ce_generator = create_counter_example_generator(true_rule_eval_fn)
     initial_examples = generate_initial_examples(true_rule_eval_fn)
     
     env.reset(initial_examples, true_rule_name, true_rule_eval_fn, ce_generator)
     
-    # 1. Incorrect Mondo
+    # 1. Incorrect Strata
     arr1 = generate_random_arrangement()
-    env.mondo(arr1, not true_rule_eval_fn(arr1))
+    env.strata(arr1, not true_rule_eval_fn(arr1))
     
-    # 2. Correct Mondo
+    # 2. Correct Strata
     arr2 = generate_random_arrangement()
-    env.mondo(arr2, true_rule_eval_fn(arr2))
+    env.strata(arr2, true_rule_eval_fn(arr2))
     
     # 3. Incorrect Proposal
     bad_rule_name = "Exactly two large shapes"
     _, bad_eval = get_rule_by_index(2)
     env.propose_rule(bad_rule_name, bad_eval)
     
-    # 4. Another Correct Mondo for token
+    # 4. Another Correct Strata for token
     arr3 = generate_random_arrangement()
-    env.mondo(arr3, true_rule_eval_fn(arr3))
+    env.strata(arr3, true_rule_eval_fn(arr3))
     
     # 5. Correct Proposal
     env.propose_rule(true_rule_name, true_rule_eval_fn)
@@ -186,7 +191,7 @@ def run_mock_agent(world: WorldAxis = WorldAxis.EASY, goal: GoalAxis = GoalAxis.
     print(f"Mock run complete. Saved history to {history_file}")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Test Agent for Visual Zendo")
+    parser = argparse.ArgumentParser(description="Test Agent for Lithic Array")
     parser.add_argument("--agent", type=str, choices=["mock", "llm"], default="mock", help="Choose 'mock' for local rules or 'llm' for AI agent.")
     parser.add_argument("--provider", type=str, choices=["openai", "anthropic", "gemini"], default="openai", help="LLM Provider")
     parser.add_argument("--model", type=str, default="gpt-4o", help="Model name (e.g. gpt-4o, claude-3-5-sonnet-20241022, gemini-2.0-flash)")
@@ -195,6 +200,7 @@ if __name__ == "__main__":
     parser.add_argument("--goal", type=str, choices=["EASY", "MEDIUM", "HARD"], default="EASY")
     parser.add_argument("--mechanics", type=str, choices=["EASY", "MEDIUM", "HARD"], default="EASY")
     parser.add_argument("--feedback", type=str, choices=["EASY", "MEDIUM", "HARD"], default="EASY")
+    parser.add_argument("--rule-index", type=int, default=1, help="Index of the rule to evaluate from rules.py")
     
     args = parser.parse_args()
     
@@ -206,4 +212,4 @@ if __name__ == "__main__":
     if args.agent == "mock":
         run_mock_agent(world=world_axis, goal=goal_axis, mechanics=mechanics_axis, feedback=feedback_axis)
     else:
-        run_llm_agent(args.provider, args.model, args.turns, world=world_axis, goal=goal_axis, mechanics=mechanics_axis, feedback=feedback_axis)
+        run_llm_agent(args.provider, args.model, args.turns, world=world_axis, goal=goal_axis, mechanics=mechanics_axis, feedback=feedback_axis, rule_index=args.rule_index)

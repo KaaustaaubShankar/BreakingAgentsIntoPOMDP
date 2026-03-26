@@ -46,41 +46,41 @@ def get_rule_by_index(index: int) -> Tuple[str, Callable]:
         return RULES_REGISTRY[index]
     raise ValueError(f"Rule index {index} out of bounds.")
 
-def create_counter_example_generator(master_eval_fn: Callable, max_attempts=1000) -> Callable:
+def create_counter_example_generator(basalt_eval_fn: Callable, max_attempts=1000) -> Callable:
     """
     Returns a function that takes an agent's evaluation function and tries to find a counter-example.
-    A counter-example is an arrangement where master_eval_fn(arr) != agent_eval_fn(arr).
+    A counter-example is an arrangement where basalt_eval_fn(arr) != agent_eval_fn(arr).
     If no counter-example is found after max_attempts, assumes the rules are equivalent and returns None.
     """
     def generator(agent_eval_fn: Callable) -> Optional[Tuple[Arrangement, bool]]:
         for _ in range(max_attempts):
             arr = generate_random_arrangement()
             try:
-                master_label = master_eval_fn(arr)
+                basalt_label = basalt_eval_fn(arr)
                 agent_label = agent_eval_fn(arr)
-                if master_label != agent_label:
-                    return arr, master_label
+                if basalt_label != agent_label:
+                    return arr, basalt_label
             except Exception:
                 # If agent eval function crashes on this input, it fails to handle valid arrangements
-                # We can treat this as a counter-example where the master succeeds but agent fails
-                return arr, master_eval_fn(arr)
+                # We can treat this as a counter-example where the basalt succeeds but agent fails
+                return arr, basalt_eval_fn(arr)
         return None
         
     return generator
 
-def generate_initial_examples(master_eval_fn: Callable, num_harmonious=3, num_discordant=3) -> list:
+def generate_initial_examples(basalt_eval_fn: Callable, num_quartz=3, num_shale=3) -> list:
     """Generates initial labeled examples to present to the user."""
     examples = []
-    h_count, d_count = 0, 0
-    while h_count < num_harmonious or d_count < num_discordant:
+    q_count, s_count = 0, 0
+    while q_count < num_quartz or s_count < num_shale:
         arr = generate_random_arrangement()
-        label = master_eval_fn(arr)
-        if label and h_count < num_harmonious:
+        label = basalt_eval_fn(arr)
+        if label and q_count < num_quartz:
             examples.append((arr, label))
-            h_count += 1
-        elif not label and d_count < num_discordant:
+            q_count += 1
+        elif not label and s_count < num_shale:
             examples.append((arr, label))
-            d_count += 1
+            s_count += 1
     
     # Shuffle so they aren't completely ordered
     random.shuffle(examples)
