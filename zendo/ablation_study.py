@@ -1,64 +1,54 @@
 import argparse
-import subprocess
-import os
-import glob
 import json
+import datetime
+
+from test_agent import run_llm_agent
 
 AXES = ["world", "goal", "mechanics", "feedback"]
 LEVELS = ["EASY", "MEDIUM", "HARD"]
 BASELINE = "EASY"
 
-def get_latest_history_file(log_dir="./game_logs"):
-    files = glob.glob(os.path.join(log_dir, "history_*.json"))
-    if not files:
-        return None
-    return max(files, key=os.path.getctime)
-
-def run_experiment(provider, model, turns, config, rule_index):
-    cmd = [
-        "python", "test_agent.py",
-        "--agent", "llm",
-        "--provider", provider,
-        "--model", model,
-        "--turns", str(turns),
-        "--world", config["world"],
-        "--goal", config["goal"],
-        "--mechanics", config["mechanics"],
-        "--feedback", config["feedback"],
-        "--rule-index", str(rule_index)
-    ]
+def run_experiment(provider, model, turns, config, rule_index, runner=run_llm_agent):
     print(f"Running config: {config} (Rule {rule_index})")
     try:
-        # Run test_agent.py and capture the output
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        # We determine if the agent won by looking for the success message in stdout
-        won = "Agent won!!" in result.stdout
-        history_file = get_latest_history_file()
-        
+        result = runner(
+            provider=provider,
+            model=model,
+            max_turns=turns,
+            world=config["world"],
+            goal=config["goal"],
+            mechanics=config["mechanics"],
+            feedback=config["feedback"],
+            rule_index=rule_index,
+            verbose=False,
+        )
         return {
             "config": config,
-            "won": won,
-            "history_file": history_file,
-            "success": True
+            "won": result["won"],
+            "history_file": result["history_file"],
+            "success": True,
+            "turns_taken": result["turns_taken"],
+            "errors": result.get("errors", []),
         }
-    except subprocess.CalledProcessError as e:
+    except Exception as e:
         print(f"Error running config: {config}")
-        print(e.stderr)
+        print(str(e))
         return {
             "config": config,
             "won": False,
             "history_file": None,
             "success": False,
-            "error": e.stderr
+            "error": str(e)
         }
 
 def main():
+    date = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     parser = argparse.ArgumentParser(description="Run single-axis ablation on Lithic Array")
     parser.add_argument("--provider", type=str, choices=["openai", "anthropic", "gemini"], default="openai")
     parser.add_argument("--model", type=str, default="gpt-4o", help="Model name (e.g. gpt-4o, claude-3-5-sonnet-20241022)")
     parser.add_argument("--turns", type=int, default=50, help="Max interaction turns per game")
     parser.add_argument("--runs", type=int, default=1, help="Number of runs per configuration")
-    parser.add_argument("--output", type=str, default="ablation_results.json", help="Path to save the summary results")
+    parser.add_argument("--output", type=str, default=f"ablation_results_{date}.json", help="Path to save the summary results")
     
     args = parser.parse_args()
     
