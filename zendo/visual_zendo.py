@@ -1,6 +1,6 @@
 import json
 import os
-import time
+from datetime import datetime
 from enum import Enum, auto
 from typing import List, Dict, Callable, Any, Tuple, Optional
 from dataclasses import dataclass, asdict
@@ -84,6 +84,17 @@ class LithicArrayEnv:
         self.counter_example_generator_fn = None
         self.failed_proposals_count = 0
         self.history = []
+
+    def _current_datetime(self) -> datetime:
+        return datetime.now().astimezone()
+
+    def _timestamp_string(self, dt: Optional[datetime] = None) -> str:
+        dt = dt or self._current_datetime()
+        return dt.isoformat(timespec="milliseconds")
+
+    def _timestamp_slug(self, dt: Optional[datetime] = None) -> str:
+        dt = dt or self._current_datetime()
+        return dt.strftime("%Y%m%d_%H%M%S_%f")
         
     def reset(self, initial_examples: List[Tuple[Arrangement, bool]], true_rule_name: str, true_rule_eval_fn: Callable, counter_example_generator_fn: Callable):
         self.tokens = 0
@@ -105,10 +116,15 @@ class LithicArrayEnv:
         })
         
         # Generate initial presentation
+        reset_dt = self._current_datetime()
+        reset_slug = self._timestamp_slug(reset_dt)
         presentation = {
             "instruction": self._get_goal_instruction(),
             "mechanics": self._get_mechanics_instruction(),
-            "initial_examples": [self._format_arrangement(arr, label, filename=f"initial_{int(time.time())}_{i}.png") for i, (arr, label) in enumerate(initial_examples)]
+            "initial_examples": [
+                self._format_arrangement(arr, label, filename=f"initial_{reset_slug}_{i}.png")
+                for i, (arr, label) in enumerate(initial_examples)
+            ]
         }
         
         self._log_event("initial_presentation", presentation)
@@ -265,7 +281,7 @@ PROPOSE: {"action": "PROPOSE", "rule_description": "...", "rule_code": "def agen
                 arr_obj, true_label = counter_example
                 # Agent's label on this counter-example would be the opposite of the true label
                 agent_label = not true_label 
-                filename = f"ce_{int(time.time())}.png"
+                filename = f"ce_{self._timestamp_slug()}.png"
                 formatted_arr = self._format_arrangement(arr_obj, filename=filename)
                 
                 response["counter_example"] = {
@@ -279,15 +295,16 @@ PROPOSE: {"action": "PROPOSE", "rule_description": "...", "rule_code": "def agen
             return response
 
     def _log_event(self, event_type: str, data: Dict[str, Any]):
+        event_dt = self._current_datetime()
         entry = {
-            "timestamp": time.time(),
+            "timestamp": self._timestamp_string(event_dt),
             "event": event_type,
             "data": data
         }
         self.history.append(entry)
 
     def save_history(self) -> str:
-        filename = os.path.join(self.artifacts_dir, f"history_{int(time.time())}.json")
+        filename = os.path.join(self.artifacts_dir, f"history_{self._timestamp_slug()}.json")
         with open(filename, "w") as f:
             json.dump(self.history, f, indent=2)
         return filename
