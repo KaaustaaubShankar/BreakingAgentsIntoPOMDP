@@ -60,6 +60,21 @@ def parse_json_from_text(text: str) -> dict:
         print("Failed to decode JSON from LLM: ", text)
         raise e
 
+def parse_axis_value(value: str, axis_type, axis_name: str):
+    normalized = value.strip().upper()
+    aliases = {
+        "LOW": "EASY",
+        "HIGH": "HARD",
+    }
+    normalized = aliases.get(normalized, normalized)
+    try:
+        return axis_type[normalized]
+    except KeyError as exc:
+        valid_values = ", ".join(member.name.lower() for member in axis_type)
+        raise argparse.ArgumentTypeError(
+            f"Invalid {axis_name} value '{value}'. Expected one of: {valid_values}, high, low."
+        ) from exc
+
 def run_llm_agent(provider: str, model: str, max_turns: int = 20, world: WorldAxis = WorldAxis.EASY, goal: GoalAxis = GoalAxis.EASY, mechanics: MechanicsAxis = MechanicsAxis.EASY, feedback: FeedbackAxis = FeedbackAxis.EASY, rule_index: int = 1):
     print(f"--- Starting LLM Agent ({provider} / {model}) ---")
     
@@ -196,18 +211,18 @@ if __name__ == "__main__":
     parser.add_argument("--provider", type=str, choices=["openai", "anthropic", "gemini"], default="openai", help="LLM Provider")
     parser.add_argument("--model", type=str, default="gpt-4o", help="Model name (e.g. gpt-4o, claude-3-5-sonnet-20241022, gemini-2.0-flash)")
     parser.add_argument("--turns", type=int, default=100, help="Max interaction turns for LLM")
-    parser.add_argument("--world", type=str, choices=["EASY", "MEDIUM", "HARD"], default="EASY")
-    parser.add_argument("--goal", type=str, choices=["EASY", "MEDIUM", "HARD"], default="EASY")
-    parser.add_argument("--mechanics", type=str, choices=["EASY", "MEDIUM", "HARD"], default="EASY")
-    parser.add_argument("--feedback", type=str, choices=["EASY", "MEDIUM", "HARD"], default="EASY")
+    parser.add_argument("--world", type=str, default="EASY", help="Axis level: easy, medium, hard/high.")
+    parser.add_argument("--goal", type=str, default="EASY", help="Axis level: easy, medium, hard/high.")
+    parser.add_argument("--mechanics", type=str, default="EASY", help="Axis level: easy, medium, hard/high.")
+    parser.add_argument("--feedback", type=str, default="EASY", help="Axis level: easy, medium, hard/high.")
     parser.add_argument("--rule-index", type=int, default=1, help="Index of the rule to evaluate from rules.py")
     
     args = parser.parse_args()
     
-    world_axis = WorldAxis[args.world]
-    goal_axis = GoalAxis[args.goal]
-    mechanics_axis = MechanicsAxis[args.mechanics]
-    feedback_axis = FeedbackAxis[args.feedback]
+    world_axis = parse_axis_value(args.world, WorldAxis, "world")
+    goal_axis = parse_axis_value(args.goal, GoalAxis, "goal")
+    mechanics_axis = parse_axis_value(args.mechanics, MechanicsAxis, "mechanics")
+    feedback_axis = parse_axis_value(args.feedback, FeedbackAxis, "feedback")
     
     if args.agent == "mock":
         run_mock_agent(world=world_axis, goal=goal_axis, mechanics=mechanics_axis, feedback=feedback_axis)

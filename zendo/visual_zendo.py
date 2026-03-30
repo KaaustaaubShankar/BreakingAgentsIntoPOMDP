@@ -2,7 +2,7 @@ import json
 import os
 from datetime import datetime
 from enum import Enum, auto
-from typing import List, Dict, Callable, Any, Tuple, Optional
+from typing import List, Dict, Callable, Any, Tuple, Optional, Type
 from dataclasses import dataclass, asdict
 
 # Optional PIL import for the Hard World Axis (Image rendering)
@@ -32,6 +32,10 @@ class FeedbackAxis(Enum):
     EASY = auto()    # Binary result + counter-example always
     MEDIUM = auto()  # Binary always, counter-example only on first failure
     HARD = auto()    # Binary only, no counter-examples
+
+
+MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_ARTIFACTS_DIR = os.path.join(MODULE_DIR, "game_logs")
 
 
 @dataclass
@@ -67,14 +71,14 @@ class LithicArrayEnv:
         goal: GoalAxis = GoalAxis.EASY,
         mechanics: MechanicsAxis = MechanicsAxis.EASY,
         feedback: FeedbackAxis = FeedbackAxis.EASY,
-        artifacts_dir: str = "./game_logs"
+        artifacts_dir: str = DEFAULT_ARTIFACTS_DIR
     ):
-        self.world = world
-        self.goal = goal
-        self.mechanics = mechanics
-        self.feedback = feedback
+        self.world = self._coerce_axis_value(world, WorldAxis)
+        self.goal = self._coerce_axis_value(goal, GoalAxis)
+        self.mechanics = self._coerce_axis_value(mechanics, MechanicsAxis)
+        self.feedback = self._coerce_axis_value(feedback, FeedbackAxis)
         
-        self.artifacts_dir = artifacts_dir
+        self.artifacts_dir = os.path.abspath(artifacts_dir)
         os.makedirs(self.artifacts_dir, exist_ok=True)
         
         # State variables
@@ -84,6 +88,25 @@ class LithicArrayEnv:
         self.counter_example_generator_fn = None
         self.failed_proposals_count = 0
         self.history = []
+
+    def _coerce_axis_value(self, value: Any, axis_type: Type[Enum]) -> Enum:
+        if isinstance(value, axis_type):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().upper()
+            aliases = {
+                "LOW": "EASY",
+                "HIGH": "HARD",
+            }
+            normalized = aliases.get(normalized, normalized)
+            try:
+                return axis_type[normalized]
+            except KeyError as exc:
+                valid_values = ", ".join(member.name.lower() for member in axis_type)
+                raise ValueError(
+                    f"Invalid {axis_type.__name__} value '{value}'. Expected one of: {valid_values}, high, low."
+                ) from exc
+        raise TypeError(f"Unsupported {axis_type.__name__} value type: {type(value).__name__}")
 
     def _current_datetime(self) -> datetime:
         return datetime.now().astimezone()
@@ -170,15 +193,22 @@ PROPOSE: {"action": "PROPOSE", "rule_description": "...", "rule_code": "def agen
         result: Dict[str, Any] = {}
         if self.world == WorldAxis.EASY:
             result["representation"] = arrangement.to_json_dict()
+            result["representation_type"] = "json"
         elif self.world == WorldAxis.MEDIUM:
             result["representation"] = arrangement.to_natural_language()
+            result["representation_type"] = "text"
         else: # HARD
-            if PIL_AVAILABLE and filename:
-                image_path = os.path.join(self.artifacts_dir, filename)
+            image_filename = filename or f"arrangement_{self._timestamp_slug()}.png"
+            image_path = os.path.abspath(os.path.join(self.artifacts_dir, image_filename))
+            if PIL_AVAILABLE:
                 self._render_image(arrangement, image_path)
-                result["representation"] = f"Image saved to {image_path}"
+                result["representation"] = image_path
+                result["representation_type"] = "image"
+                result["image_path"] = image_path
             else:
-                result["representation"] = "Image format requested but PIL not available or filename not provided (fallback to JSON: " + str(arrangement.to_json_dict()) + ")"
+                result["representation"] = arrangement.to_json_dict()
+                result["representation_type"] = "json"
+                result["fallback_reason"] = "PIL not available for image rendering"
                 
         if label is not None:
             result["label"] = "Quartz" if label else "Shale"
@@ -286,6 +316,7 @@ PROPOSE: {"action": "PROPOSE", "rule_description": "...", "rule_code": "def agen
                 
                 response["counter_example"] = {
                     "arrangement": formatted_arr["representation"],
+                    "arrangement_details": formatted_arr,
                     "basalt_label": "Quartz" if true_label else "Shale",
                     "your_rule_predicted": "Quartz" if agent_label else "Shale",
                     "message": "This arrangement satisfies the Basalt's rule but not yours, or vice versa."
