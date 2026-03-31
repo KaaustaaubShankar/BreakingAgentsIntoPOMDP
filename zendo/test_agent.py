@@ -27,6 +27,12 @@ try:
 except ImportError:
     pass
 
+try:
+    from epistemic import BeliefStateTracker, extract_candidate_from_text
+    EPISTEMIC_AVAILABLE = True
+except ImportError:
+    EPISTEMIC_AVAILABLE = False
+
 
 class LLMClient:
     def __init__(self, provider: str, model: str):
@@ -185,6 +191,7 @@ def run_llm_agent(
     logger.log(f"--- Starting LLM Agent ({provider} / {model}) ---")
 
     client = client or LLMClient(provider, model)
+    tracker = BeliefStateTracker() if EPISTEMIC_AVAILABLE else None
     env, presentation, true_rule_name, _ = _build_environment(
         world=world,
         goal=goal,
@@ -217,6 +224,12 @@ def run_llm_agent(
             history_log += f"\nTurn {turn+1} System Error: {msg}\n"
             continue
 
+        # Epistemic: extract any hypothesis the agent articulated this turn
+        if tracker and llm_response:
+            extracted = extract_candidate_from_text(llm_response)
+            if extracted and not tracker.find_candidate_by_text(extracted):
+                tracker.register_candidate(extracted, turn=turns_taken)
+
         action = action_data.get("action")
         if action == "STRATA":
             shapes_data = action_data.get("arrangement", [])
@@ -224,6 +237,10 @@ def run_llm_agent(
             shapes = [Shape(**s) for s in shapes_data]
             arr = Arrangement(shapes=shapes)
             res = env.strata(arr, pred)
+            actual = res.get("result") == "Quartz"
+            if tracker:
+                tracker.evaluate_strata(shapes_data, pred, actual, turn=turns_taken)
+                tracker.update("strata_match" if pred == actual else "strata_mismatch", turn=turns_taken)
             log = f"Action: STRATA | Predicted: {pred} | Arrangement: {shapes_data}\nResult: {res}"
             logger.log(log)
             history_log += log + "\n"
@@ -243,11 +260,15 @@ def run_llm_agent(
                 continue
 
             res = env.propose_rule(desc, agent_eval_fn)
+            accepted = res.get("result") == "Accepted"
+            if tracker:
+                tracker.evaluate_propose(desc, accepted=accepted, turn=turns_taken)
+                tracker.update("propose_accepted" if accepted else "propose_rejected", turn=turns_taken)
             log = f"Action: PROPOSE | Rule: {desc}\nResult: {res}"
             logger.log(log)
             history_log += log + "\n"
 
-            if res.get("result") == "Accepted":
+            if accepted:
                 logger.log("\nAgent won!!")
                 won = True
                 break
@@ -280,6 +301,8 @@ def run_llm_agent(
 
     history_file = _save_history(env, save_history)
     if history_file is not None:
+        if tracker:
+            tracker.save(history_file)
         logger.log(f"\nSaved history to {history_file}")
 
     return AgentRunResult(
