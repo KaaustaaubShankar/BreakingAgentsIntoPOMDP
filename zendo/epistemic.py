@@ -276,12 +276,22 @@ class BeliefStateTracker:
         }
 
     def save(self, history_file: str):
-        """Merge epistemic traces into an existing history JSON file."""
+        """Merge epistemic traces into an existing history JSON file.
+        
+        The history file may be a list (event log) or a dict. We wrap list
+        format in a dict so we can add our keys alongside it.
+        """
         try:
             with open(history_file, "r") as f:
-                data = json.load(f)
+                raw = json.load(f)
         except Exception:
-            data = {}
+            raw = {}
+
+        # Cal's format is a list of event dicts — wrap it to add our keys
+        if isinstance(raw, list):
+            data = {"events": raw}
+        else:
+            data = raw
 
         data.update(self.to_log())
 
