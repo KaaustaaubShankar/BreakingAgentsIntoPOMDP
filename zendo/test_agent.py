@@ -29,40 +29,39 @@ except ImportError:
 
 
 class LLMClient:
+    OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+
     def __init__(self, provider: str, model: str):
         self.provider = provider.lower()
         self.model = model
+
+    def _openrouter_client(self):
+        api_key = os.environ.get("OPENROUTER_API_KEY")
+        if not api_key:
+            raise ValueError("OPENROUTER_API_KEY environment variable is required when using OpenRouter.")
+
+        import openai
+
+        client_kwargs = {
+            "base_url": self.OPENROUTER_BASE_URL,
+            "api_key": api_key,
+        }
+
+        return openai.OpenAI(**client_kwargs)
     
     def generate(self, system_prompt: str, user_prompt: str) -> str:
-        if self.provider == "openai":
-            import openai
-            client = openai.OpenAI()
+        if self.provider == "openrouter":
+            client = self._openrouter_client()
             resp = client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
             )
-            return resp.choices[0].message.content
-            
-        elif self.provider == "anthropic":
-            import anthropic
-            client = anthropic.Anthropic()
-            resp = client.messages.create(
-                model=self.model,
-                max_tokens=4096,
-                system=system_prompt,
-                messages=[{"role": "user", "content": user_prompt}]
-            )
-            return resp.content[0].text
-            
-        elif self.provider == "gemini":
-            import google.generativeai as genai
-            genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
-            model_inst = genai.GenerativeModel(self.model, system_instruction=system_prompt)
-            resp = model_inst.generate_content(user_prompt)
-            return resp.text
-            
-        else:
-            raise ValueError(f"Unknown provider {self.provider}. Choose from openai, anthropic, gemini.")
+            content = resp.choices[0].message.content
+            if content is None:
+                raise ValueError("OpenRouter returned an empty message content.")
+            return content
+
+        raise ValueError(f"Unknown provider {self.provider}. Choose from openrouter.")
 
 
 class RunLogger:
@@ -356,8 +355,8 @@ def run_mock_agent(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Test Agent for Lithic Array")
     parser.add_argument("--agent", type=str, choices=["mock", "llm"], default="llm", help="Choose 'mock' for local rules or 'llm' for AI agent.")
-    parser.add_argument("--provider", type=str, choices=["openai", "anthropic", "gemini"], default="openai", help="LLM Provider")
-    parser.add_argument("--model", type=str, default="gpt-4o", help="Model name (e.g. gpt-4o, claude-3-5-sonnet-20241022, gemini-2.0-flash)")
+    parser.add_argument("--provider", type=str, choices=["openrouter"], default="openrouter", help="LLM Provider")
+    parser.add_argument("--model", type=str, default="openai/gpt-4o", help="OpenRouter model name (e.g. openai/gpt-4o)")
     parser.add_argument("--turns", type=int, default=100, help="Max interaction turns for LLM")
     parser.add_argument("--world", type=str, default="EASY", help="Axis level: easy or hard/high.")
     parser.add_argument("--goal", type=str, default="EASY", help="Axis level: easy or hard/high.")
