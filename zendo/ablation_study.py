@@ -5,7 +5,6 @@ import datetime
 from test_agent import run_llm_agent
 
 AXES = ["world", "goal", "mechanics", "feedback"]
-LEVELS = ["EASY", "MEDIUM", "HARD"]
 BASELINE = "EASY"
 
 def run_experiment(provider, model, turns, config, rule_index, runner=run_llm_agent):
@@ -44,8 +43,8 @@ def run_experiment(provider, model, turns, config, rule_index, runner=run_llm_ag
 def main():
     date = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     parser = argparse.ArgumentParser(description="Run single-axis ablation on Lithic Array")
-    parser.add_argument("--provider", type=str, choices=["openai", "anthropic", "gemini"], default="openai")
-    parser.add_argument("--model", type=str, default="gpt-4o", help="Model name (e.g. gpt-4o, claude-3-5-sonnet-20241022)")
+    parser.add_argument("--provider", type=str, choices=["openrouter"], default="openrouter")
+    parser.add_argument("--model", type=str, default="openai/gpt-4o", help="OpenRouter model name (e.g. openai/gpt-4o)")
     parser.add_argument("--turns", type=int, default=50, help="Max interaction turns per game")
     parser.add_argument("--runs", type=int, default=1, help="Number of runs per configuration")
     parser.add_argument("--output", type=str, default=f"ablation_results_{date}.json", help="Path to save the summary results")
@@ -58,7 +57,7 @@ def main():
     
     # Single axis ablations (Scaling one axis at a time)
     for axis in AXES:
-        for level in ["MEDIUM", "HARD"]:
+        for level in ["HARD"]:
             config = base_config.copy()
             config[axis] = level
             configs_to_run.append((f"{axis}_{level}", config))
