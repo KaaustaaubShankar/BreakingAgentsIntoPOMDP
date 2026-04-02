@@ -5,7 +5,6 @@ import datetime
 from test_agent import run_llm_agent
 
 AXES = ["world", "goal", "mechanics", "feedback"]
-LEVELS = ["EASY", "MEDIUM", "HARD"]
 BASELINE = "EASY"
 
 def run_experiment(provider, model, turns, config, rule_index, runner=run_llm_agent):
@@ -58,7 +57,7 @@ def main():
     
     # Single axis ablations (Scaling one axis at a time)
     for axis in AXES:
-        for level in ["MEDIUM", "HARD"]:
+        for level in ["HARD"]:
             config = base_config.copy()
             config[axis] = level
             configs_to_run.append((f"{axis}_{level}", config))
