@@ -34,6 +34,64 @@ class LLMClient:
     def __init__(self, provider: str, model: str):
         self.provider = provider.lower()
         self.model = model
+        self.reset_usage()
+
+    def reset_usage(self):
+        self.last_usage = self._empty_usage_summary()
+        self.usage_totals = self._empty_usage_summary()
+
+    def _empty_usage_summary(self) -> Dict[str, int]:
+        return {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0,
+            "calls": 0,
+            "calls_with_usage": 0,
+        }
+
+    def _usage_value(self, usage: Any, *keys: str) -> Optional[int]:
+        for key in keys:
+            if isinstance(usage, dict):
+                value = usage.get(key)
+            else:
+                value = getattr(usage, key, None)
+            if value is None:
+                continue
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                continue
+        return None
+
+    def _extract_usage(self, response: Any) -> Dict[str, int]:
+        usage = getattr(response, "usage", None)
+        input_tokens = self._usage_value(usage, "input_tokens", "prompt_tokens")
+        output_tokens = self._usage_value(usage, "output_tokens", "completion_tokens")
+        total_tokens = self._usage_value(usage, "total_tokens")
+        has_usage = usage is not None and any(
+            value is not None for value in (input_tokens, output_tokens, total_tokens)
+        )
+
+        input_tokens = input_tokens or 0
+        output_tokens = output_tokens or 0
+        total_tokens = total_tokens if total_tokens is not None else input_tokens + output_tokens
+
+        return {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": total_tokens,
+            "calls": 1,
+            "calls_with_usage": 1 if has_usage else 0,
+        }
+
+    def _record_usage(self, response: Any):
+        usage = self._extract_usage(response)
+        self.last_usage = usage
+        for key, value in usage.items():
+            self.usage_totals[key] += value
+
+    def get_usage_summary(self) -> Dict[str, int]:
+        return dict(self.usage_totals)
 
     def _openrouter_client(self):
         api_key = os.environ.get("OPENROUTER_API_KEY")
@@ -46,6 +104,15 @@ class LLMClient:
             "base_url": self.OPENROUTER_BASE_URL,
             "api_key": api_key,
         }
+        default_headers = {}
+        referer = os.environ.get("OPENROUTER_HTTP_REFERER")
+        app_title = os.environ.get("OPENROUTER_APP_TITLE")
+        if referer:
+            default_headers["HTTP-Referer"] = referer
+        if app_title:
+            default_headers["X-Title"] = app_title
+        if default_headers:
+            client_kwargs["default_headers"] = default_headers
 
         return openai.OpenAI(**client_kwargs)
     
@@ -56,6 +123,7 @@ class LLMClient:
                 model=self.model,
                 messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
             )
+            self._record_usage(resp)
             content = resp.choices[0].message.content
             if content is None:
                 raise ValueError("OpenRouter returned an empty message content.")
@@ -91,6 +159,7 @@ class AgentRunResult:
     rule_index: Optional[int] = None
     true_rule_name: Optional[str] = None
     understanding: Optional[Dict[str, str]] = None
+    llm_usage: Optional[Dict[str, int]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -165,6 +234,29 @@ def _save_history(env: LithicArrayEnv, save_history: bool) -> Optional[str]:
     return env.save_history()
 
 
+def _empty_llm_usage_summary() -> Dict[str, int]:
+    return {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "calls": 0,
+        "calls_with_usage": 0,
+    }
+
+
+def _reset_client_usage(client: Any):
+    if hasattr(client, "reset_usage"):
+        client.reset_usage()
+
+
+def _get_client_usage_summary(client: Any) -> Dict[str, int]:
+    if hasattr(client, "get_usage_summary"):
+        usage = client.get_usage_summary()
+        if usage is not None:
+            return usage
+    return _empty_llm_usage_summary()
+
+
 def run_llm_agent(
     provider: str,
     model: str,
@@ -184,6 +276,7 @@ def run_llm_agent(
     logger.log(f"--- Starting LLM Agent ({provider} / {model}) ---")
 
     client = client or LLMClient(provider, model)
+    _reset_client_usage(client)
     env, presentation, true_rule_name, _ = _build_environment(
         world=world,
         goal=goal,
@@ -277,6 +370,19 @@ def run_llm_agent(
         errors.append(msg)
         logger.log(msg)
 
+    llm_usage = _get_client_usage_summary(client)
+    env._log_event("llm_usage_summary", {
+        "provider": provider,
+        "model": model,
+        **llm_usage,
+    })
+    logger.log(
+        "LLM token usage: "
+        f"{llm_usage['input_tokens']} input, "
+        f"{llm_usage['output_tokens']} output "
+        f"across {llm_usage['calls']} calls."
+    )
+
     history_file = _save_history(env, save_history)
     if history_file is not None:
         logger.log(f"\nSaved history to {history_file}")
@@ -296,6 +402,7 @@ def run_llm_agent(
         rule_index=rule_index,
         true_rule_name=true_rule_name,
         understanding=understanding,
+        llm_usage=llm_usage,
     ).to_dict()
 
 
@@ -334,6 +441,12 @@ def run_mock_agent(
     arr3 = generate_random_arrangement()
     env.strata(arr3, true_rule_eval_fn(arr3))
     final_response = env.propose_rule(true_rule_name, true_rule_eval_fn)
+    llm_usage = _empty_llm_usage_summary()
+    env._log_event("llm_usage_summary", {
+        "provider": None,
+        "model": None,
+        **llm_usage,
+    })
 
     history_file = _save_history(env, save_history)
     if history_file is not None:
@@ -350,6 +463,7 @@ def run_mock_agent(
         logs=logger.messages,
         rule_index=rule_index,
         true_rule_name=true_rule_name,
+        llm_usage=llm_usage,
     ).to_dict()
 
 if __name__ == "__main__":
@@ -357,7 +471,7 @@ if __name__ == "__main__":
     parser.add_argument("--agent", type=str, choices=["mock", "llm"], default="llm", help="Choose 'mock' for local rules or 'llm' for AI agent.")
     parser.add_argument("--provider", type=str, choices=["openrouter"], default="openrouter", help="LLM Provider")
     parser.add_argument("--model", type=str, default="openai/gpt-4o", help="OpenRouter model name (e.g. openai/gpt-4o)")
-    parser.add_argument("--turns", type=int, default=100, help="Max interaction turns for LLM")
+    parser.add_argument("--turns", type=int, default=20, help="Max interaction turns for LLM")
     parser.add_argument("--world", type=str, default="EASY", help="Axis level: easy or hard/high.")
     parser.add_argument("--goal", type=str, default="EASY", help="Axis level: easy or hard/high.")
     parser.add_argument("--mechanics", type=str, default="EASY", help="Axis level: easy or hard/high.")

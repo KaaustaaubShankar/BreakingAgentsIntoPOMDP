@@ -18,6 +18,11 @@ class _FakeOpenAIClient:
     def _create(self, **kwargs):
         self.last_request = kwargs
         return types.SimpleNamespace(
+            usage=types.SimpleNamespace(
+                prompt_tokens=12,
+                completion_tokens=5,
+                total_tokens=17,
+            ),
             choices=[
                 types.SimpleNamespace(
                     message=types.SimpleNamespace(content='{"action": "STRATA"}')
@@ -66,6 +71,16 @@ class LLMClientTests(unittest.TestCase):
                     {"role": "system", "content": "system prompt"},
                     {"role": "user", "content": "user prompt"},
                 ],
+            },
+        )
+        self.assertEqual(
+            client.get_usage_summary(),
+            {
+                "input_tokens": 12,
+                "output_tokens": 5,
+                "total_tokens": 17,
+                "calls": 1,
+                "calls_with_usage": 1,
             },
         )
 
