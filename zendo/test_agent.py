@@ -471,7 +471,7 @@ if __name__ == "__main__":
     parser.add_argument("--agent", type=str, choices=["mock", "llm"], default="llm", help="Choose 'mock' for local rules or 'llm' for AI agent.")
     parser.add_argument("--provider", type=str, choices=["openrouter"], default="openrouter", help="LLM Provider")
     parser.add_argument("--model", type=str, default="openai/gpt-4o", help="OpenRouter model name (e.g. openai/gpt-4o)")
-    parser.add_argument("--turns", type=int, default=20, help="Max interaction turns for LLM")
+    parser.add_argument("--turns", type=int, default=100, help="Max interaction turns for LLM")
     parser.add_argument("--world", type=str, default="EASY", help="Axis level: easy or hard/high.")
     parser.add_argument("--goal", type=str, default="EASY", help="Axis level: easy or hard/high.")
     parser.add_argument("--mechanics", type=str, default="EASY", help="Axis level: easy or hard/high.")
