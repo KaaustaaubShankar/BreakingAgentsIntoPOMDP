@@ -19,40 +19,77 @@ PARAM_MAX = 10
 
 
 # ---------------------------------------------------------------------------
-# Rule registry — hidden functions the agent must discover
+# Target registry — hidden configurations the agent must converge on
+#
+# Design: the system "comes online" when the agent's submitted parameters
+# are within TOLERANCE of the hidden target on all dimensions.  The agent
+# never sees the target directly; it navigates by proximity feedback.
+# This is the lockpicking model Kaus described — the agent *feels its way*
+# toward the target rather than inferring a logical rule.
 # ---------------------------------------------------------------------------
+
+TOLERANCE = 2        # Max per-parameter distance for the system to come online
+
 
 def _make_params(n: int = N_PARAMS) -> Dict[str, int]:
     """Generate a random parameter configuration."""
     return {f"P{i+1}": random.randint(PARAM_MIN, PARAM_MAX) for i in range(n)}
 
 
-# Each rule: (name, eval_fn)
-# eval_fn takes a dict like {"P1": 7, "P2": 3, "P3": 9} → bool
-RULES_REGISTRY = [
-    (
-        "P1 > 5",
-        lambda p: p["P1"] > 5,
-    ),
-    (
-        "P1 > 5 AND P2 > 5",
-        lambda p: p["P1"] > 5 and p["P2"] > 5,
-    ),
-    (
-        "P1 + P2 > 12",
-        lambda p: p["P1"] + p["P2"] > 12,
-    ),
-    (
-        "(P1 + P2 > 12) AND (P3 < 4)",
-        lambda p: (p["P1"] + p["P2"] > 12) and (p["P3"] < 4),
-    ),
+def _make_target(n: int = N_PARAMS) -> Dict[str, int]:
+    """Generate a hidden target configuration."""
+    return {f"P{i+1}": random.randint(PARAM_MIN, PARAM_MAX) for i in range(n)}
+
+
+def _is_online(params: Dict[str, int], target: Dict[str, int], tolerance: int = TOLERANCE) -> bool:
+    """System comes online when every parameter is within tolerance of its target."""
+    return all(abs(params[k] - target[k]) <= tolerance for k in target)
+
+
+def _proximity_signal(params: Dict[str, int], target: Dict[str, int]) -> Dict[str, str]:
+    """
+    Per-parameter proximity signal (hot/warm/cold) for EASY feedback.
+    Revealed only when the agent's prediction is correct — rewarding calibrated confidence.
+    """
+    signals = {}
+    for k in target:
+        dist = abs(params[k] - target[k])
+        if dist == 0:
+            signals[k] = "exact"
+        elif dist <= TOLERANCE:
+            signals[k] = "hot"       # within tolerance — would activate
+        elif dist <= TOLERANCE * 2:
+            signals[k] = "warm"      # close but not activating
+        else:
+            signals[k] = "cold"      # far away
+    return signals
+
+
+# Target registry: named scenarios with fixed seeds for reproducible evals.
+# Each entry: (name, target_dict)
+# The eval function is generated at runtime by ParameterTuningEnv.reset().
+TARGETS_REGISTRY = [
+    ("T1: single-dim target",   {"P1": 7, "P2": 5, "P3": 3}),
+    ("T2: high-end target",     {"P1": 9, "P2": 8, "P3": 9}),
+    ("T3: low-end target",      {"P1": 1, "P2": 2, "P3": 1}),
+    ("T4: mixed target",        {"P1": 3, "P2": 8, "P3": 5}),
 ]
 
 
 def get_rule_by_index(index: int) -> Tuple[str, Callable]:
-    if 0 <= index < len(RULES_REGISTRY):
-        return RULES_REGISTRY[index]
-    raise ValueError(f"Rule index {index} out of bounds (max {len(RULES_REGISTRY)-1}).")
+    """Returns (target_name, eval_fn) for the given index."""
+    if 0 <= index < len(TARGETS_REGISTRY):
+        name, target = TARGETS_REGISTRY[index]
+        fn = lambda p, t=target: _is_online(p, t)
+        return name, fn
+    raise ValueError(f"Target index {index} out of bounds (max {len(TARGETS_REGISTRY)-1}).")
+
+
+def get_target_by_index(index: int) -> Dict[str, int]:
+    """Returns the raw target dict (used by env for proximity feedback)."""
+    if 0 <= index < len(TARGETS_REGISTRY):
+        return dict(TARGETS_REGISTRY[index][1])
+    raise ValueError(f"Target index {index} out of bounds.")
 
 
 def generate_initial_examples(rule_fn: Callable, num_on: int = 3, num_off: int = 3) -> List[Tuple[Dict, bool]]:
@@ -75,7 +112,7 @@ def generate_initial_examples(rule_fn: Callable, num_on: int = 3, num_off: int =
 
 
 def create_counter_example_generator(true_fn: Callable, max_attempts: int = 1000) -> Callable:
-    """Returns a function that finds a counter-example to an agent's proposed rule."""
+    """Returns a function that finds params where agent diverges from target."""
     def generator(agent_fn: Callable) -> Optional[Tuple[Dict, bool]]:
         for _ in range(max_attempts):
             params = _make_params()
@@ -129,6 +166,7 @@ class ParameterTuningEnv:
         self.tokens = 0
         self.true_rule_name = None
         self.true_rule_fn = None
+        self.hidden_target: Optional[Dict[str, int]] = None  # for proximity feedback
         self.counter_example_generator_fn = None
         self.failed_proposals_count = 0
         self.history = []
@@ -143,10 +181,12 @@ class ParameterTuningEnv:
         true_rule_name: str,
         true_rule_fn: Callable,
         counter_example_generator_fn: Callable,
+        hidden_target: Optional[Dict[str, int]] = None,
     ) -> Dict[str, Any]:
         self.tokens = 0
         self.true_rule_name = true_rule_name
         self.true_rule_fn = true_rule_fn
+        self.hidden_target = hidden_target
         self.counter_example_generator_fn = counter_example_generator_fn
         self.failed_proposals_count = 0
         self.history = []
@@ -203,9 +243,18 @@ class ParameterTuningEnv:
             "tokens_current": self.tokens,
         }
 
-        # Feedback axis: EASY gives partial signal (which params are in threshold range)
-        if self.feedback == FeedbackAxis.EASY and true_online:
-            response["hint"] = self._get_partial_feedback(params)
+        # Feedback axis: EASY/MEDIUM give proximity signals to help the agent converge.
+        # EASY — always show per-param hot/warm/cold when prediction was correct.
+        # MEDIUM — show proximity only on correct online predictions (no offline hints).
+        # HARD — binary only, no proximity.
+        if self.hidden_target is not None:
+            show_proximity = (
+                self.feedback == FeedbackAxis.EASY and match
+            ) or (
+                self.feedback == FeedbackAxis.MEDIUM and match and true_online
+            )
+            if show_proximity:
+                response["proximity"] = _proximity_signal(params, self.hidden_target)
 
         self._log_event("set_params", {
             "params": params,
@@ -325,13 +374,8 @@ PROPOSE: {{"action": "PROPOSE", "rule_description": "...", "rule_code": "def age
                 # No label revealed in HARD world
             }
 
-    def _get_partial_feedback(self, params: Dict[str, int]) -> str:
-        """EASY feedback: hint about which parameters seem to matter (heuristic)."""
-        # Simple heuristic: highlight params that are above midpoint
-        high = [k for k, v in params.items() if v > (PARAM_MAX - PARAM_MIN) / 2]
-        if high:
-            return f"Parameters above midpoint: {', '.join(high)}"
-        return "All parameters are at or below midpoint."
+    # _get_partial_feedback removed — proximity is now handled by _proximity_signal()
+    # which operates on the hidden target directly.
 
     # ------------------------------------------------------------------
     # Logging
