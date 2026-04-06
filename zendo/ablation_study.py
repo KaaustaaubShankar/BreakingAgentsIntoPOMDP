@@ -27,6 +27,7 @@ def run_experiment(provider, model, turns, config, rule_index, runner=run_llm_ag
             "history_file": result["history_file"],
             "success": True,
             "turns_taken": result["turns_taken"],
+            "llm_usage": result.get("llm_usage"),
             "errors": result.get("errors", []),
         }
     except Exception as e:
