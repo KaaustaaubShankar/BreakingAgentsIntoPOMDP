@@ -266,8 +266,68 @@ class ParameterTuningEnv:
 
         return response
 
+    def propose_target(self, guessed_target: Dict[str, int]) -> Dict[str, Any]:
+        """
+        Agent spends 1 token to propose the hidden target configuration directly.
+
+        The agent submits a dict like {"P1": 7, "P2": 5, "P3": 3} — their best
+        guess at the target values. Accepted if every param is within TOLERANCE.
+        On rejection, EASY feedback reveals which params are off and by how much
+        (direction only — "too high" / "too low" / "exact"), not the actual values.
+        """
+        if self.tokens < 1:
+            msg = "Insufficient tokens. Earn tokens via SET first."
+            self._log_event("propose_failed_tokens", {"guessed_target": guessed_target})
+            return {"error": msg}
+
+        self.tokens -= 1
+        guessed_target = {k: int(v) for k, v in guessed_target.items()}
+
+        if self.hidden_target is None:
+            # Fallback: accept if all params are within tolerance of each other
+            # (should not happen in normal use)
+            accepted = False
+        else:
+            accepted = _is_online(guessed_target, self.hidden_target)
+
+        if accepted:
+            response: Dict[str, Any] = {
+                "result": "Accepted",
+                "message": "Correct! You have found the hidden target configuration.",
+            }
+            self._log_event("propose_success", {"guessed_target": guessed_target, "response": response})
+            return response
+
+        self.failed_proposals_count += 1
+        response = {"result": "Rejected"}
+
+        # Directional hints — reveal which way each param is off, not the actual value.
+        # EASY: always. MEDIUM: first failure only. HARD: none.
+        provide_hint = (
+            self.feedback == FeedbackAxis.EASY or
+            (self.feedback == FeedbackAxis.MEDIUM and self.failed_proposals_count == 1)
+        )
+        if provide_hint and self.hidden_target is not None:
+            hints = {}
+            for k in self.hidden_target:
+                g = guessed_target.get(k, 0)
+                t = self.hidden_target[k]
+                if abs(g - t) <= TOLERANCE:
+                    hints[k] = "close"
+                elif g < t:
+                    hints[k] = "too low"
+                else:
+                    hints[k] = "too high"
+            response["hints"] = hints
+            response["message"] = "Not quite. Adjust and try again."
+
+        self._log_event("propose_rejected", {"guessed_target": guessed_target, "response": response})
+        return response
+
+    # Keep propose_rule as a legacy alias so existing tests/ablation code doesn't break
     def propose_rule(self, description: str, agent_fn: Callable) -> Dict[str, Any]:
-        """Agent spends 1 token to propose the rule."""
+        """Legacy: accepts a callable and tests it against the true function.
+        Use propose_target() for the convergence model."""
         if self.tokens < 1:
             msg = "Insufficient tokens. Earn tokens via SET first."
             self._log_event("propose_failed_tokens", {"description": description})
@@ -285,26 +345,18 @@ class ParameterTuningEnv:
             return response
 
         self.failed_proposals_count += 1
-        response: Dict[str, Any] = {"result": "Rejected"}
-
-        provide_ce = False
-        if self.feedback == FeedbackAxis.EASY:
-            provide_ce = True
-        elif self.feedback == FeedbackAxis.MEDIUM and self.failed_proposals_count == 1:
-            provide_ce = True
-
-        if provide_ce:
+        response_r: Dict[str, Any] = {"result": "Rejected"}
+        if self.feedback == FeedbackAxis.EASY or (
+            self.feedback == FeedbackAxis.MEDIUM and self.failed_proposals_count == 1
+        ):
             ce_params, true_label = counter_example
-            agent_label = not true_label
-            response["counter_example"] = {
+            response_r["counter_example"] = {
                 "params": ce_params,
                 "system_actual": "online" if true_label else "offline",
-                "your_rule_predicted": "online" if agent_label else "offline",
-                "message": "These parameter values produce a different result under your rule vs the true rule.",
+                "your_rule_predicted": "online" if not true_label else "offline",
             }
-
-        self._log_event("propose_rejected", {"description": description, "response": response})
-        return response
+        self._log_event("propose_rejected", {"description": description, "response": response_r})
+        return response_r
 
     # ------------------------------------------------------------------
     # Presentation helpers
@@ -325,8 +377,8 @@ class ParameterTuningEnv:
         param_names = ", ".join(f"P{i+1}" for i in range(self.n_params))
         if self.mechanics == MechanicsAxis.EASY:
             return f"""You have {self.n_params} integer parameters ({param_names}), each ranging from {PARAM_MIN} to {PARAM_MAX}.
-Set them to observe whether the system comes online (1) or stays offline (0). Correct predictions earn 1 token.
-Spend 1 token to propose the rule.
+Set them to observe whether the system comes online or offline. Correct predictions earn 1 token.
+When you think you know the hidden target configuration, spend 1 token to propose it.
 
 Respond with ONLY a JSON block. No other text.
 
@@ -337,11 +389,10 @@ SET action:
   "prediction": true
 }}
 
-PROPOSE action (costs 1 token):
+PROPOSE action (costs 1 token — submit your best guess at the target values):
 {{
   "action": "PROPOSE",
-  "rule_description": "P1 > 5 and P2 > 5",
-  "rule_code": "def agent_eval_fn(p):\\n    return p['P1'] > 5 and p['P2'] > 5"
+  "target": {{"P1": 7, "P2": 5, "P3": 3}}
 }}"""
         elif self.mechanics == MechanicsAxis.MEDIUM:
             return f"""Parameters: {param_names} (range {PARAM_MIN}-{PARAM_MAX}). Observe the system output. Propose the rule when ready.

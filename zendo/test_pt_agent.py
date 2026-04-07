@@ -235,21 +235,25 @@ def run_pt_llm_agent(
             history_log += log + "\n"
 
         elif action == "PROPOSE":
-            desc = action_data.get("rule_description", "")
-            code_str = action_data.get("rule_code", "")
-            local_env: Dict[str, Any] = {}
+            # Agent submits a target vector guess, not Python code
+            guessed = action_data.get("target", action_data.get("params", {}))
+            if not guessed:
+                msg = "PROPOSE missing 'target' field"
+                errors.append(msg)
+                logger.log(msg)
+                history_log += msg + "\n"
+                continue
             try:
-                exec(code_str, {}, local_env)
-                agent_fn = local_env["agent_eval_fn"]
+                guessed = {k: int(v) for k, v in guessed.items()}
             except Exception as e:
-                msg = f"PROPOSE failed (bad code): {e}"
+                msg = f"PROPOSE bad target format: {e}"
                 errors.append(msg)
                 logger.log(msg)
                 history_log += msg + "\n"
                 continue
 
-            res = env.propose_rule(desc, agent_fn)
-            log = f"PROPOSE '{desc}' → {res}"
+            res = env.propose_target(guessed)
+            log = f"PROPOSE target={guessed} → {res}"
             logger.log(log)
             history_log += log + "\n"
 
@@ -325,10 +329,10 @@ def run_pt_mock_agent(
     env.set_params(hidden_target, prediction=True)
     env.set_params({k: 0 for k in hidden_target}, prediction=False)
 
-    # Propose a wrong rule, then the correct one
-    env.propose_rule("P1 > 9", lambda p: p["P1"] > 9)
-    # Correct: use the actual target eval fn
-    result = env.propose_rule(true_name, true_fn)
+    # Propose a wrong target, then the correct one
+    wrong = {k: 0 for k in hidden_target}
+    env.propose_target(wrong)
+    result = env.propose_target(hidden_target)  # exact match = accepted
 
     llm_usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0,
                  "calls": 0, "calls_with_usage": 0}
