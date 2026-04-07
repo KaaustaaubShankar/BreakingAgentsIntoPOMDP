@@ -15,22 +15,18 @@ except ImportError:
 
 class WorldAxis(Enum):
     EASY = auto()    # Structured JSON table
-    MEDIUM = auto()  # Natural language prose
     HARD = auto()    # Raw images only
 
 class GoalAxis(Enum):
     EASY = auto()    # Explicit goal stated
-    MEDIUM = auto()  # "There is a pattern here. Figure it out."
     HARD = auto()    # Nothing stated
 
 class MechanicsAxis(Enum):
     EASY = auto()    # Full explanation
-    MEDIUM = auto()  # Told only "query arrangements or propose a rule"
     HARD = auto()    # No instructions
 
 class FeedbackAxis(Enum):
     EASY = auto()    # Binary result + counter-example always
-    MEDIUM = auto()  # Binary always, counter-example only on first failure
     HARD = auto()    # Binary only, no counter-examples
 
 
@@ -156,8 +152,6 @@ class LithicArrayEnv:
     def _get_goal_instruction(self):
         if self.goal == GoalAxis.EASY:
             return "Your goal is to discover the hidden rule that classifies arrangements as Quartz or Shale. State the rule explicitly to win."
-        elif self.goal == GoalAxis.MEDIUM:
-            return "There is a pattern here. Figure it out."
         else: # HARD
             return ""
 
@@ -179,13 +173,6 @@ Propose Action Schema (Requires 1 token):
   "rule_description": "All pieces are red",
   "rule_code": "def agent_eval_fn(arr):\n    # arr is an Arrangement obj. You can access shapes via arr.shapes. Each shape has .color, .size, .type_\n    return all(s.color == 'red' for s in arr.shapes)"
 }"""
-        elif self.mechanics == MechanicsAxis.MEDIUM:
-            return """You can query arrangements or propose a rule.
-
-You must respond with only a JSON block containing your action. Do not include markdown or other text.
-Action Schemas:
-STRATA: {"action": "STRATA", "arrangement": [{"color": "red", "size": "small", "type_": "circle"}], "prediction": true}
-PROPOSE: {"action": "PROPOSE", "rule_description": "...", "rule_code": "def agent_eval_fn(arr): ..."}"""
         else: # HARD
             return "Respond with a JSON object containing your action ('STRATA' or 'PROPOSE')."
 
@@ -194,9 +181,6 @@ PROPOSE: {"action": "PROPOSE", "rule_description": "...", "rule_code": "def agen
         if self.world == WorldAxis.EASY:
             result["representation"] = arrangement.to_json_dict()
             result["representation_type"] = "json"
-        elif self.world == WorldAxis.MEDIUM:
-            result["representation"] = arrangement.to_natural_language()
-            result["representation_type"] = "text"
         else: # HARD
             image_filename = filename or f"arrangement_{self._timestamp_slug()}.png"
             image_path = os.path.abspath(os.path.join(self.artifacts_dir, image_filename))
@@ -301,8 +285,6 @@ PROPOSE: {"action": "PROPOSE", "rule_description": "...", "rule_code": "def agen
             # Determine if we should provide the counter-example based on Feedback Axis
             provide_ce = False
             if self.feedback == FeedbackAxis.EASY:
-                provide_ce = True
-            elif self.feedback == FeedbackAxis.MEDIUM and self.failed_proposals_count == 1:
                 provide_ce = True
             elif self.feedback == FeedbackAxis.HARD:
                 provide_ce = False

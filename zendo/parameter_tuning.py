@@ -243,18 +243,9 @@ class ParameterTuningEnv:
             "tokens_current": self.tokens,
         }
 
-        # Feedback axis: EASY/MEDIUM give proximity signals to help the agent converge.
-        # EASY — always show per-param hot/warm/cold when prediction was correct.
-        # MEDIUM — show proximity only on correct online predictions (no offline hints).
-        # HARD — binary only, no proximity.
-        if self.hidden_target is not None:
-            show_proximity = (
-                self.feedback == FeedbackAxis.EASY and match
-            ) or (
-                self.feedback == FeedbackAxis.MEDIUM and match and true_online
-            )
-            if show_proximity:
-                response["proximity"] = _proximity_signal(params, self.hidden_target)
+        # Feedback axis: EASY gives proximity; HARD gives binary only.
+        if self.hidden_target is not None and self.feedback == FeedbackAxis.EASY and match:
+            response["proximity"] = _proximity_signal(params, self.hidden_target)
 
         self._log_event("set_params", {
             "params": params,
@@ -301,12 +292,8 @@ class ParameterTuningEnv:
         self.failed_proposals_count += 1
         response = {"result": "Rejected"}
 
-        # Directional hints — reveal which way each param is off, not the actual value.
-        # EASY: always. MEDIUM: first failure only. HARD: none.
-        provide_hint = (
-            self.feedback == FeedbackAxis.EASY or
-            (self.feedback == FeedbackAxis.MEDIUM and self.failed_proposals_count == 1)
-        )
+        # Directional hints — EASY always, HARD never.
+        provide_hint = self.feedback == FeedbackAxis.EASY
         if provide_hint and self.hidden_target is not None:
             hints = {}
             for k in self.hidden_target:
@@ -346,9 +333,7 @@ class ParameterTuningEnv:
 
         self.failed_proposals_count += 1
         response_r: Dict[str, Any] = {"result": "Rejected"}
-        if self.feedback == FeedbackAxis.EASY or (
-            self.feedback == FeedbackAxis.MEDIUM and self.failed_proposals_count == 1
-        ):
+        if self.feedback == FeedbackAxis.EASY:
             ce_params, true_label = counter_example
             response_r["counter_example"] = {
                 "params": ce_params,
@@ -368,8 +353,6 @@ class ParameterTuningEnv:
                 "Your goal is to discover the hidden rule that determines when the system comes online. "
                 "Set parameter values to test configurations, then propose the rule when you think you know it."
             )
-        elif self.goal == GoalAxis.MEDIUM:
-            return "There is a pattern here. Figure out what makes the system activate."
         else:  # HARD
             return ""
 
@@ -394,12 +377,6 @@ PROPOSE action (costs 1 token — submit your best guess at the target values):
   "action": "PROPOSE",
   "target": {{"P1": 7, "P2": 5, "P3": 3}}
 }}"""
-        elif self.mechanics == MechanicsAxis.MEDIUM:
-            return f"""Parameters: {param_names} (range {PARAM_MIN}-{PARAM_MAX}). Observe the system output. Propose the rule when ready.
-
-Respond with ONLY a JSON block.
-SET: {{"action": "SET", "params": {{"P1": 5}}, "prediction": true}}
-PROPOSE: {{"action": "PROPOSE", "rule_description": "...", "rule_code": "def agent_eval_fn(p): ..."}}"""
         else:  # HARD
             return "Respond with a JSON object containing your action ('SET' or 'PROPOSE')."
 
@@ -409,13 +386,6 @@ PROPOSE: {{"action": "PROPOSE", "rule_description": "...", "rule_code": "def age
             return {
                 "representation": params,
                 "representation_type": "dict",
-                "label": "online" if label else "offline",
-            }
-        elif self.world == WorldAxis.MEDIUM:
-            parts = ", ".join(f"{k}={v}" for k, v in params.items())
-            return {
-                "representation": f"System with {parts} is {'online' if label else 'offline'}.",
-                "representation_type": "text",
                 "label": "online" if label else "offline",
             }
         else:  # HARD — no labels, abstract names
