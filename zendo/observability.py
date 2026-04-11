@@ -80,7 +80,7 @@ def _extract_usage(result: Dict[str, Any]) -> Dict[str, Optional[float]]:
     }
 
 
-def build_run_summary(*, result: Dict[str, Any], experiment_name: str, config: Dict[str, Any], run_index: int, logs_dir: str = DEFAULT_LOGS_DIR) -> Dict[str, Any]:
+def build_run_summary(*, result: Dict[str, Any], experiment_name: str, config: Dict[str, Any], run_index: int, logs_dir: str = DEFAULT_LOGS_DIR, environment: str = "env1") -> Dict[str, Any]:
     ensure_dir(logs_dir)
 
     history_file = result.get("history_file")
@@ -106,7 +106,7 @@ def build_run_summary(*, result: Dict[str, Any], experiment_name: str, config: D
 
     return {
         "run_id": run_id,
-        "environment": "env1",
+        "environment": environment,
         "condition": experiment_name,
         "ablated_axis": ablated_axis,
         "config": config,
@@ -140,8 +140,9 @@ def build_run_summary(*, result: Dict[str, Any], experiment_name: str, config: D
     }
 
 
-def append_run_summary(summary: Dict[str, Any], *, logs_dir: str = DEFAULT_LOGS_DIR, filename: str = "env1_run_summaries.jsonl") -> str:
+def append_run_summary(summary: Dict[str, Any], *, logs_dir: str = DEFAULT_LOGS_DIR, filename: Optional[str] = None) -> str:
     ensure_dir(logs_dir)
+    filename = filename or f"{summary.get('environment', 'env1')}_run_summaries.jsonl"
     path = os.path.join(logs_dir, filename)
     with open(path, "a") as f:
         f.write(json.dumps(summary) + "\n")
@@ -178,8 +179,9 @@ def build_condition_summary(run_summaries: List[Dict[str, Any]]) -> Dict[str, An
     }
 
 
-def write_condition_summary(summary: Dict[str, Any], *, logs_dir: str = DEFAULT_LOGS_DIR, filename: str = "env1_condition_summary.json") -> str:
+def write_condition_summary(summary: Dict[str, Any], *, logs_dir: str = DEFAULT_LOGS_DIR, filename: Optional[str] = None) -> str:
     ensure_dir(logs_dir)
+    filename = filename or f"{summary.get('environment', 'env1')}_condition_summary.json"
     path = os.path.join(logs_dir, filename)
     with open(path, "w") as f:
         json.dump(summary, f, indent=2)
