@@ -1,9 +1,19 @@
+"""Single-axis ablation runner for the Parameter Tuning environment.
+
+Mirrors the existing Zendo ablation runner shape so both environments remain
+reviewable side by side.
+"""
+
 import argparse
 import datetime
 import json
 
-from observability import append_run_summary, build_condition_summary, build_run_summary, write_condition_summary
-from test_pt_agent import run_pt_llm_agent
+try:
+    from observability import append_run_summary, build_condition_summary, build_run_summary, write_condition_summary
+    from test_pt_agent import run_pt_llm_agent
+except ImportError:
+    from zendo.observability import append_run_summary, build_condition_summary, build_run_summary, write_condition_summary
+    from zendo.test_pt_agent import run_pt_llm_agent
 
 AXES = ["world", "goal", "mechanics", "feedback"]
 BASELINE = "EASY"

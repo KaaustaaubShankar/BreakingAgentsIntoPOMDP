@@ -1,3 +1,11 @@
+"""Shared observability helpers for Zendo and Parameter Tuning runners.
+
+This module keeps the reporting contract small and local:
+- write one trace JSON per run when history exists
+- append one normalized run summary JSON object per run
+- aggregate condition summaries for quick comparison
+"""
+
 import json
 import os
 from collections import defaultdict
@@ -70,6 +78,7 @@ def _load_history_metrics(history_file: Optional[str]) -> Dict[str, Any]:
 
 
 def _extract_usage(result: Dict[str, Any]) -> Dict[str, Optional[float]]:
+    """Normalize usage/cost fields from a runner result into summary fields."""
     usage = result.get("usage") or {}
     return {
         "input_tokens": usage.get("input_tokens"),
@@ -81,6 +90,7 @@ def _extract_usage(result: Dict[str, Any]) -> Dict[str, Optional[float]]:
 
 
 def build_run_summary(*, result: Dict[str, Any], experiment_name: str, config: Dict[str, Any], run_index: int, logs_dir: str = DEFAULT_LOGS_DIR, environment: str = "env1") -> Dict[str, Any]:
+    """Build one normalized run summary and persist a trace copy when available."""
     ensure_dir(logs_dir)
 
     history_file = result.get("history_file")
@@ -150,6 +160,7 @@ def append_run_summary(summary: Dict[str, Any], *, logs_dir: str = DEFAULT_LOGS_
 
 
 def build_condition_summary(run_summaries: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Aggregate normalized run summaries by condition."""
     grouped: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
     for item in run_summaries:
         grouped[item["condition"]].append(item)

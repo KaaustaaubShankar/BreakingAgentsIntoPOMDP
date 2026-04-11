@@ -1,8 +1,7 @@
-"""
-test_pt_agent.py — LLM agent runner for the Parameter Tuning environment.
+"""test_pt_agent.py — LLM agent runner for the Parameter Tuning environment.
 
-Mirrors the structure of test_agent.py (Zendo) so both environments share
-the same harness conventions and the ablation study can drive either one.
+Mirrors the structure of `test_agent.py` so Env1 and Env2 share the same
+harness conventions while preserving environment-specific actions and prompts.
 
 Usage:
     python test_pt_agent.py --agent llm --provider openrouter --model openai/gpt-4o
@@ -141,7 +140,23 @@ class PTRunResult:
         return asdict(self)
 
 
+<<<<<<< HEAD
+=======
+def parse_json_from_text(text: str) -> dict:
+    """Extract a JSON object from raw model output, tolerating fenced blocks."""
+    text = text.strip()
+    match = re.search(r"```(?:json)?(.*?)```", text, re.DOTALL)
+    if match:
+        text = match.group(1).strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Failed to decode JSON from LLM output: {text}") from exc
+
+
+>>>>>>> bb51635 (Tidy observability and PT runner docs)
 def parse_axis_value(value: str, axis_type, axis_name: str):
+    """Parse CLI axis values, supporting low/high aliases for easy/hard."""
     normalized = value.strip().upper()
     aliases = {"LOW": "EASY", "HIGH": "HARD"}
     normalized = aliases.get(normalized, normalized)
