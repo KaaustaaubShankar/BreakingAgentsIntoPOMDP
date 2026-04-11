@@ -7,7 +7,10 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from dataclasses import dataclass, asdict
 
 # Reuse the same axis enums as Zendo for consistency
-from visual_zendo import WorldAxis, GoalAxis, MechanicsAxis, FeedbackAxis
+try:
+    from visual_zendo import WorldAxis, GoalAxis, MechanicsAxis, FeedbackAxis
+except ImportError:
+    from zendo.visual_zendo import WorldAxis, GoalAxis, MechanicsAxis, FeedbackAxis
 
 
 MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -154,10 +157,10 @@ class ParameterTuningEnv:
         artifacts_dir: str = DEFAULT_ARTIFACTS_DIR,
         n_params: int = N_PARAMS,
     ):
-        self.world = world
-        self.goal = goal
-        self.mechanics = mechanics
-        self.feedback = feedback
+        self.world = self._coerce_axis_value(world, WorldAxis)
+        self.goal = self._coerce_axis_value(goal, GoalAxis)
+        self.mechanics = self._coerce_axis_value(mechanics, MechanicsAxis)
+        self.feedback = self._coerce_axis_value(feedback, FeedbackAxis)
         self.artifacts_dir = os.path.abspath(artifacts_dir)
         os.makedirs(self.artifacts_dir, exist_ok=True)
         self.n_params = n_params
@@ -170,6 +173,25 @@ class ParameterTuningEnv:
         self.counter_example_generator_fn = None
         self.failed_proposals_count = 0
         self.history = []
+
+    def _coerce_axis_value(self, value: Any, axis_type):
+        if isinstance(value, axis_type):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().upper()
+            aliases = {
+                "LOW": "EASY",
+                "HIGH": "HARD",
+            }
+            normalized = aliases.get(normalized, normalized)
+            try:
+                return axis_type[normalized]
+            except KeyError as exc:
+                valid_values = ", ".join(member.name.lower() for member in axis_type)
+                raise ValueError(
+                    f"Invalid {axis_type.__name__} value '{value}'. Expected one of: {valid_values}, high, low."
+                ) from exc
+        raise TypeError(f"Unsupported {axis_type.__name__} value type: {type(value).__name__}")
 
     # ------------------------------------------------------------------
     # Reset
