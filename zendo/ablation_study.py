@@ -2,11 +2,14 @@ import argparse
 import json
 import datetime
 
+from observability import append_run_summary, build_condition_summary, build_run_summary, write_condition_summary
 from test_agent import run_llm_agent
 
 AXES = ["world", "goal", "mechanics", "feedback"]
 LEVELS = ["EASY", "MEDIUM", "HARD"]
 BASELINE = "EASY"
+SINGLE_AXIS_HARD = "single-axis-hard"
+MONDAY_ALIAS = "monday-alias"
 
 def run_experiment(provider, model, turns, config, rule_index, runner=run_llm_agent):
     print(f"Running config: {config} (Rule {rule_index})")
@@ -42,12 +45,13 @@ def run_experiment(provider, model, turns, config, rule_index, runner=run_llm_ag
         }
 
 def main():
-    date = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    date = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     parser = argparse.ArgumentParser(description="Run single-axis ablation on Lithic Array")
     parser.add_argument("--provider", type=str, choices=["openai", "anthropic", "gemini"], default="openai")
     parser.add_argument("--model", type=str, default="gpt-4o", help="Model name (e.g. gpt-4o, claude-3-5-sonnet-20241022)")
     parser.add_argument("--turns", type=int, default=50, help="Max interaction turns per game")
     parser.add_argument("--runs", type=int, default=1, help="Number of runs per configuration")
+    parser.add_argument("--matrix", choices=[SINGLE_AXIS_HARD, MONDAY_ALIAS], default=SINGLE_AXIS_HARD, help="single-axis-hard preserves Kaus's ladder, monday-alias uses knockout naming on the same HARD-only configs")
     parser.add_argument("--output", type=str, default=f"ablation_results_{date}.json", help="Path to save the summary results")
     
     args = parser.parse_args()
@@ -56,14 +60,18 @@ def main():
     base_config = {axis: BASELINE for axis in AXES}
     configs_to_run = [("baseline", base_config)]
     
-    # Single axis ablations (Scaling one axis at a time)
+    # Preserve Kaus's later structure: baseline + HARD-only single-axis runs.
+    # Monday alias only changes naming, not semantics.
     for axis in AXES:
-        for level in ["MEDIUM", "HARD"]:
-            config = base_config.copy()
-            config[axis] = level
-            configs_to_run.append((f"{axis}_{level}", config))
+        config = base_config.copy()
+        config[axis] = "HARD"
+        experiment_name = f"{axis}_HARD"
+        if args.matrix == MONDAY_ALIAS:
+            experiment_name = f"{axis}_knockout"
+        configs_to_run.append((experiment_name, config))
             
     results = []
+    run_summaries = []
     
     for name, config in configs_to_run:
         print(f"\n{'='*50}")
@@ -77,6 +85,15 @@ def main():
                 res["rule_index"] = rule_index
                 res["run_index"] = i
                 results.append(res)
+
+                summary = build_run_summary(
+                    result=res,
+                    experiment_name=name,
+                    config=config,
+                    run_index=i,
+                )
+                append_run_summary(summary)
+                run_summaries.append(summary)
                 
                 # Print quick feedback
                 status = "WON" if res.get("won") else "FAILED"
@@ -85,8 +102,13 @@ def main():
     # Save the aggregated results
     with open(args.output, "w") as f:
         json.dump(results, f, indent=2)
+
+    condition_summary = build_condition_summary(run_summaries)
+    condition_summary_path = write_condition_summary(condition_summary)
         
     print(f"\nAblation study complete. Detailed aggregated results saved to {args.output}")
+    print(f"Run summaries appended to zendo/logs/env1_run_summaries.jsonl")
+    print(f"Condition summary written to {condition_summary_path}")
     
     # Print a neat summary summary
     print("\nSummary:")

@@ -38,6 +38,53 @@ class LLMClient:
     def __init__(self, provider: str, model: str):
         self.provider = provider.lower()
         self.model = model
+        self.usage_totals = {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0,
+            "billed_cost_usd": None,
+            "raw_model_cost_usd": None,
+        }
+
+    def _extract_usage(self, response: Any) -> Dict[str, Any]:
+        usage = getattr(response, "usage", None)
+        if usage is None and isinstance(response, dict):
+            usage = response.get("usage")
+
+        def _get(obj, *keys):
+            for key in keys:
+                if isinstance(obj, dict) and key in obj:
+                    return obj[key]
+                if hasattr(obj, key):
+                    return getattr(obj, key)
+            return None
+
+        input_tokens = _get(usage, "input_tokens", "prompt_tokens") or 0
+        output_tokens = _get(usage, "output_tokens", "completion_tokens") or 0
+        total_tokens = _get(usage, "total_tokens") or (input_tokens + output_tokens)
+
+        return {
+            "input_tokens": int(input_tokens or 0),
+            "output_tokens": int(output_tokens or 0),
+            "total_tokens": int(total_tokens or 0),
+            "billed_cost_usd": _get(usage, "billed_cost_usd"),
+            "raw_model_cost_usd": _get(usage, "raw_model_cost_usd"),
+        }
+
+    def _record_usage(self, response: Any):
+        usage = self._extract_usage(response)
+        self.usage_totals["input_tokens"] += usage["input_tokens"]
+        self.usage_totals["output_tokens"] += usage["output_tokens"]
+        self.usage_totals["total_tokens"] += usage["total_tokens"]
+        if usage["billed_cost_usd"] is not None:
+            current = self.usage_totals["billed_cost_usd"] or 0.0
+            self.usage_totals["billed_cost_usd"] = current + float(usage["billed_cost_usd"])
+        if usage["raw_model_cost_usd"] is not None:
+            current = self.usage_totals["raw_model_cost_usd"] or 0.0
+            self.usage_totals["raw_model_cost_usd"] = current + float(usage["raw_model_cost_usd"])
+
+    def get_usage_summary(self) -> Dict[str, Any]:
+        return dict(self.usage_totals)
     
     def generate(self, system_prompt: str, user_prompt: str) -> str:
         if self.provider == "openai":
@@ -47,6 +94,7 @@ class LLMClient:
                 model=self.model,
                 messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
             )
+            self._record_usage(resp)
             return resp.choices[0].message.content
             
         elif self.provider == "anthropic":
@@ -58,6 +106,7 @@ class LLMClient:
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_prompt}]
             )
+            self._record_usage(resp)
             return resp.content[0].text
             
         elif self.provider == "gemini":
@@ -65,6 +114,7 @@ class LLMClient:
             genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
             model_inst = genai.GenerativeModel(self.model, system_instruction=system_prompt)
             resp = model_inst.generate_content(user_prompt)
+            self._record_usage(resp)
             return resp.text
             
         else:
@@ -98,6 +148,7 @@ class AgentRunResult:
     rule_index: Optional[int] = None
     true_rule_name: Optional[str] = None
     understanding: Optional[Dict[str, str]] = None
+    usage: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -320,6 +371,7 @@ def run_llm_agent(
         rule_index=rule_index,
         true_rule_name=true_rule_name,
         understanding=understanding,
+        usage=client.get_usage_summary() if hasattr(client, "get_usage_summary") else None,
     ).to_dict()
 
 
