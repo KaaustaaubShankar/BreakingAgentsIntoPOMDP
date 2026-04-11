@@ -32,10 +32,6 @@ except ImportError:
     pass
 
 
-# ---------------------------------------------------------------------------
-# LLM client (reuse from test_agent — same OpenRouter wrapper)
-# ---------------------------------------------------------------------------
-
 class LLMClient:
     OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
@@ -49,25 +45,38 @@ class LLMClient:
         self.usage_totals = self._empty_usage()
 
     def _empty_usage(self) -> Dict[str, int]:
-        return {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0,
-                "calls": 0, "calls_with_usage": 0}
+        return {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0,
+            "calls": 0,
+            "calls_with_usage": 0,
+        }
 
     def _extract_usage(self, response: Any) -> Dict[str, int]:
         usage = getattr(response, "usage", None)
+
         def _val(u, *keys):
             for k in keys:
                 v = u.get(k) if isinstance(u, dict) else getattr(u, k, None)
                 if v is not None:
-                    try: return int(v)
-                    except (TypeError, ValueError): pass
+                    try:
+                        return int(v)
+                    except (TypeError, ValueError):
+                        pass
             return None
 
         inp = _val(usage, "input_tokens", "prompt_tokens") or 0
         out = _val(usage, "output_tokens", "completion_tokens") or 0
         tot = _val(usage, "total_tokens") or (inp + out)
         has = usage is not None and any(x > 0 for x in (inp, out, tot))
-        return {"input_tokens": inp, "output_tokens": out, "total_tokens": tot,
-                "calls": 1, "calls_with_usage": 1 if has else 0}
+        return {
+            "input_tokens": inp,
+            "output_tokens": out,
+            "total_tokens": tot,
+            "calls": 1,
+            "calls_with_usage": 1 if has else 0,
+        }
 
     def _record_usage(self, response: Any):
         u = self._extract_usage(response)
@@ -100,10 +109,6 @@ class LLMClient:
         raise ValueError(f"Unknown provider: {self.provider}")
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
 class RunLogger:
     def __init__(self, verbose: bool = True):
         self.verbose = verbose
@@ -128,12 +133,25 @@ class PTRunResult:
     errors: List[str] = field(default_factory=list)
     provider: Optional[str] = None
     model: Optional[str] = None
-    target_index: Optional[int] = None
-    true_target_name: Optional[str] = None
-    llm_usage: Optional[Dict[str, int]] = None
+    rule_index: Optional[int] = None
+    true_rule_name: Optional[str] = None
+    usage: Optional[Dict[str, int]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
+
+
+def parse_axis_value(value: str, axis_type, axis_name: str):
+    normalized = value.strip().upper()
+    aliases = {"LOW": "EASY", "HIGH": "HARD"}
+    normalized = aliases.get(normalized, normalized)
+    try:
+        return axis_type[normalized]
+    except KeyError as exc:
+        valid_values = ", ".join(member.name.lower() for member in axis_type)
+        raise argparse.ArgumentTypeError(
+            f"Invalid {axis_name} value '{value}'. Expected one of: {valid_values}, high, low."
+        ) from exc
 
 
 def _parse_json(text: str) -> dict:
@@ -158,16 +176,8 @@ def _build_system_prompt(presentation: Dict[str, Any]) -> str:
 
 
 def _build_history_log(presentation: Dict[str, Any]) -> str:
-    return (
-        "Initial examples:\n"
-        + json.dumps(presentation["initial_examples"], indent=2)
-        + "\n\n"
-    )
+    return "Initial examples:\n" + json.dumps(presentation["initial_examples"], indent=2) + "\n\n"
 
-
-# ---------------------------------------------------------------------------
-# LLM agent runner
-# ---------------------------------------------------------------------------
 
 def run_pt_llm_agent(
     provider: str,
@@ -177,7 +187,7 @@ def run_pt_llm_agent(
     goal: GoalAxis = GoalAxis.EASY,
     mechanics: MechanicsAxis = MechanicsAxis.EASY,
     feedback: FeedbackAxis = FeedbackAxis.EASY,
-    target_index: int = 0,
+    rule_index: int = 0,
     *,
     client: Optional[Any] = None,
     verbose: bool = True,
@@ -185,18 +195,17 @@ def run_pt_llm_agent(
     artifacts_dir: Optional[str] = None,
 ):
     logger = RunLogger(verbose=verbose)
-    logger.log(f"--- PT Agent ({provider}/{model}) | Target {target_index} ---")
+    logger.log(f"--- PT Agent ({provider}/{model}) | Target {rule_index} ---")
 
     env_kwargs: Dict[str, Any] = dict(world=world, goal=goal, mechanics=mechanics, feedback=feedback)
     if artifacts_dir:
         env_kwargs["artifacts_dir"] = artifacts_dir
     env = ParameterTuningEnv(**env_kwargs)
 
-    true_name, true_fn = get_rule_by_index(target_index)
-    hidden_target = get_target_by_index(target_index)
+    true_name, true_fn = get_rule_by_index(rule_index)
+    hidden_target = get_target_by_index(rule_index)
     ce_gen = create_counter_example_generator(true_fn)
     examples = generate_initial_examples(true_fn)
-
     presentation = env.reset(examples, true_name, true_fn, ce_gen, hidden_target=hidden_target)
 
     client = client or LLMClient(provider, model)
@@ -235,7 +244,6 @@ def run_pt_llm_agent(
             history_log += log + "\n"
 
         elif action == "PROPOSE":
-            # Agent submits a target vector guess, not Python code
             guessed = action_data.get("target", action_data.get("params", {}))
             if not guessed:
                 msg = "PROPOSE missing 'target' field"
@@ -270,8 +278,8 @@ def run_pt_llm_agent(
 
     logger.log(f"\nGame over. Turns: {turns_taken}")
 
-    llm_usage = client.get_usage_summary() if hasattr(client, "get_usage_summary") else {}
-    env._log_event("llm_usage_summary", {"provider": provider, "model": model, **llm_usage})
+    usage = client.get_usage_summary() if hasattr(client, "get_usage_summary") else {}
+    env._log_event("llm_usage_summary", {"provider": provider, "model": model, **usage})
 
     history_file = None
     if save_history:
@@ -290,22 +298,18 @@ def run_pt_llm_agent(
         history_log=history_log,
         logs=logger.messages,
         errors=errors,
-        target_index=target_index,
-        true_target_name=true_name,
-        llm_usage=llm_usage,
+        rule_index=rule_index,
+        true_rule_name=true_name,
+        usage=usage,
     ).to_dict()
 
-
-# ---------------------------------------------------------------------------
-# Mock agent (for local smoke-testing without an API key)
-# ---------------------------------------------------------------------------
 
 def run_pt_mock_agent(
     world: WorldAxis = WorldAxis.EASY,
     goal: GoalAxis = GoalAxis.EASY,
     mechanics: MechanicsAxis = MechanicsAxis.EASY,
     feedback: FeedbackAxis = FeedbackAxis.EASY,
-    target_index: int = 0,
+    rule_index: int = 0,
     *,
     verbose: bool = True,
     save_history: bool = True,
@@ -319,24 +323,18 @@ def run_pt_mock_agent(
         env_kwargs["artifacts_dir"] = artifacts_dir
     env = ParameterTuningEnv(**env_kwargs)
 
-    true_name, true_fn = get_rule_by_index(target_index)
-    hidden_target = get_target_by_index(target_index)
+    true_name, true_fn = get_rule_by_index(rule_index)
+    hidden_target = get_target_by_index(rule_index)
     ce_gen = create_counter_example_generator(true_fn)
     examples = generate_initial_examples(true_fn)
     env.reset(examples, true_name, true_fn, ce_gen, hidden_target=hidden_target)
 
-    # Probe with the actual target (should activate) and a random config (likely not)
     env.set_params(hidden_target, prediction=True)
     env.set_params({k: 0 for k in hidden_target}, prediction=False)
+    result = env.propose_target(hidden_target)
 
-    # Propose a wrong target, then the correct one
-    wrong = {k: 0 for k in hidden_target}
-    env.propose_target(wrong)
-    result = env.propose_target(hidden_target)  # exact match = accepted
-
-    llm_usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0,
-                 "calls": 0, "calls_with_usage": 0}
-    env._log_event("llm_usage_summary", {"provider": None, "model": None, **llm_usage})
+    usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "calls": 0, "calls_with_usage": 0}
+    env._log_event("llm_usage_summary", {"provider": None, "model": None, **usage})
 
     history_file = None
     if save_history:
@@ -346,30 +344,16 @@ def run_pt_mock_agent(
     return PTRunResult(
         agent="mock",
         won=result.get("result") == "Accepted",
-        turns_taken=4,
-        max_turns=4,
+        turns_taken=3,
+        max_turns=3,
         tokens_remaining=env.tokens,
         history_file=history_file,
         history_log="",
         logs=logger.messages,
-        target_index=target_index,
-        true_target_name=true_name,
-        llm_usage=llm_usage,
+        rule_index=rule_index,
+        true_rule_name=true_name,
+        usage=usage,
     ).to_dict()
-
-
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
-
-def _parse_axis(value: str, axis_type, name: str):
-    aliases = {"LOW": "EASY", "HIGH": "HARD"}
-    norm = aliases.get(value.strip().upper(), value.strip().upper())
-    try:
-        return axis_type[norm]
-    except KeyError:
-        valid = ", ".join(m.name.lower() for m in axis_type)
-        raise argparse.ArgumentTypeError(f"Invalid {name} '{value}'. Expected: {valid}")
 
 
 if __name__ == "__main__":
@@ -382,19 +366,19 @@ if __name__ == "__main__":
     parser.add_argument("--goal", default="EASY")
     parser.add_argument("--mechanics", default="EASY")
     parser.add_argument("--feedback", default="EASY")
-    parser.add_argument("--target-index", type=int, default=0)
+    parser.add_argument("--rule-index", type=int, default=0)
     parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args()
 
-    world = _parse_axis(args.world, WorldAxis, "world")
-    goal = _parse_axis(args.goal, GoalAxis, "goal")
-    mechanics = _parse_axis(args.mechanics, MechanicsAxis, "mechanics")
-    feedback = _parse_axis(args.feedback, FeedbackAxis, "feedback")
+    world = parse_axis_value(args.world, WorldAxis, "world")
+    goal = parse_axis_value(args.goal, GoalAxis, "goal")
+    mechanics = parse_axis_value(args.mechanics, MechanicsAxis, "mechanics")
+    feedback = parse_axis_value(args.feedback, FeedbackAxis, "feedback")
 
     if args.agent == "mock":
         run_pt_mock_agent(world=world, goal=goal, mechanics=mechanics, feedback=feedback,
-                          target_index=args.target_index, verbose=not args.quiet)
+                          rule_index=args.rule_index, verbose=not args.quiet)
     else:
         run_pt_llm_agent(args.provider, args.model, args.turns,
                          world=world, goal=goal, mechanics=mechanics, feedback=feedback,
-                         target_index=args.target_index, verbose=not args.quiet)
+                         rule_index=args.rule_index, verbose=not args.quiet)
