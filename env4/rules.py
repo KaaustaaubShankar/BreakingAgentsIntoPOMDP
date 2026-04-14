@@ -13,8 +13,8 @@ VOWELS = {"A", "E"}
 
 
 def rule_1(seq: str) -> Label:
-    """R if the middle symbol (index 2) has the highest ASCII value."""
-    return "R" if seq[2] == max(seq) else "L"
+    """R if the middle symbol (index 2) is alphabetically earlier than the first symbol."""
+    return "R" if seq[2] < seq[0] else "L"
 
 
 def rule_2(seq: str) -> Label:
@@ -25,8 +25,9 @@ def rule_2(seq: str) -> Label:
 
 
 def rule_3(seq: str) -> Label:
-    """L if any symbol appears more than once."""
-    return "L" if len(seq) != len(set(seq)) else "R"
+    """R if exactly one symbol appears more than once (one pair, rest unique)."""
+    counts = [seq.count(c) for c in set(seq)]
+    return "R" if counts.count(2) == 1 and all(c <= 2 for c in counts) else "L"
 
 
 def rule_4(seq: str) -> Label:
@@ -36,10 +37,8 @@ def rule_4(seq: str) -> Label:
 
 
 def rule_5(seq: str) -> Label:
-    """R if the sum of positions of vowels exceeds sum of positions of non-vowels."""
-    vowel_pos = sum(i for i, c in enumerate(seq) if c in VOWELS)
-    non_vowel_pos = sum(i for i, c in enumerate(seq) if c not in VOWELS)
-    return "R" if vowel_pos > non_vowel_pos else "L"
+    """R if the first symbol has a higher ASCII value than the last symbol."""
+    return "R" if seq[0] > seq[-1] else "L"
 
 
 def rule_6(seq: str) -> Label:
@@ -48,9 +47,9 @@ def rule_6(seq: str) -> Label:
 
 
 def rule_7(seq: str) -> Label:
-    """R if removing the first symbol leaves a string that is alphabetically sorted."""
-    tail = seq[1:]
-    return "R" if tail == "".join(sorted(tail)) else "L"
+    """R if exactly 2 adjacent pairs are in ascending alphabetical order."""
+    ascending_pairs = sum(seq[i] < seq[i+1] for i in range(len(seq)-1))
+    return "R" if ascending_pairs == 2 else "L"
 
 
 def rule_8(seq: str) -> Label:
@@ -68,10 +67,8 @@ def rule_9(seq: str) -> Label:
 
 
 def rule_10(seq: str) -> Label:
-    """L if the sequence sorted descending differs from the original by exactly 2 positions."""
-    desc = "".join(sorted(seq, reverse=True))
-    diffs = sum(1 for a, b in zip(seq, desc) if a != b)
-    return "L" if diffs == 2 else "R"
+    """R if the 2nd character (index 1) is alphabetically earlier than the 4th character (index 3)."""
+    return "R" if seq[1] < seq[3] else "L"
 
 
 RULES = {
