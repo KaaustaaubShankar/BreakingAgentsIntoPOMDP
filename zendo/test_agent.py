@@ -27,6 +27,12 @@ try:
 except ImportError:
     pass
 
+try:
+    from epistemic import BeliefStateTracker, extract_candidate_from_text
+    EPISTEMIC_AVAILABLE = True
+except ImportError:
+    EPISTEMIC_AVAILABLE = False
+
 
 class LLMClient:
     OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
@@ -124,12 +130,30 @@ class LLMClient:
                 messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
             )
             self._record_usage(resp)
-            content = resp.choices[0].message.content
-            if content is None:
-                raise ValueError("OpenRouter returned an empty message content.")
-            return content
-
-        raise ValueError(f"Unknown provider {self.provider}. Choose from openrouter.")
+            return resp.choices[0].message.content
+            
+        elif self.provider == "anthropic":
+            import anthropic
+            client = anthropic.Anthropic()
+            resp = client.messages.create(
+                model=self.model,
+                max_tokens=4096,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}]
+            )
+            self._record_usage(resp)
+            return resp.content[0].text
+            
+        elif self.provider == "gemini":
+            import google.generativeai as genai
+            genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
+            model_inst = genai.GenerativeModel(self.model, system_instruction=system_prompt)
+            resp = model_inst.generate_content(user_prompt)
+            self._record_usage(resp)
+            return resp.text
+            
+        else:
+            raise ValueError(f"Unknown provider {self.provider}. Choose from openai, anthropic, gemini.")
 
 
 class RunLogger:
@@ -277,6 +301,7 @@ def run_llm_agent(
 
     client = client or LLMClient(provider, model)
     _reset_client_usage(client)
+    tracker = BeliefStateTracker() if EPISTEMIC_AVAILABLE else None
     env, presentation, true_rule_name, _ = _build_environment(
         world=world,
         goal=goal,
@@ -309,6 +334,12 @@ def run_llm_agent(
             history_log += f"\nTurn {turn+1} System Error: {msg}\n"
             continue
 
+        # Epistemic: extract any hypothesis the agent articulated this turn
+        if tracker and llm_response:
+            extracted = extract_candidate_from_text(llm_response)
+            if extracted and not tracker.find_candidate_by_text(extracted):
+                tracker.register_candidate(extracted, turn=turns_taken)
+
         action = action_data.get("action")
         if action == "STRATA":
             shapes_data = action_data.get("arrangement", [])
@@ -316,6 +347,10 @@ def run_llm_agent(
             shapes = [Shape(**s) for s in shapes_data]
             arr = Arrangement(shapes=shapes)
             res = env.strata(arr, pred)
+            actual = res.get("result") == "Quartz"
+            if tracker:
+                tracker.evaluate_strata(shapes_data, pred, actual, turn=turns_taken)
+                tracker.update("strata_match" if pred == actual else "strata_mismatch", turn=turns_taken)
             log = f"Action: STRATA | Predicted: {pred} | Arrangement: {shapes_data}\nResult: {res}"
             logger.log(log)
             history_log += log + "\n"
@@ -335,11 +370,15 @@ def run_llm_agent(
                 continue
 
             res = env.propose_rule(desc, agent_eval_fn)
+            accepted = res.get("result") == "Accepted"
+            if tracker:
+                tracker.evaluate_propose(desc, accepted=accepted, turn=turns_taken)
+                tracker.update("propose_accepted" if accepted else "propose_rejected", turn=turns_taken)
             log = f"Action: PROPOSE | Rule: {desc}\nResult: {res}"
             logger.log(log)
             history_log += log + "\n"
 
-            if res.get("result") == "Accepted":
+            if accepted:
                 logger.log("\nAgent won!!")
                 won = True
                 break
@@ -385,6 +424,8 @@ def run_llm_agent(
 
     history_file = _save_history(env, save_history)
     if history_file is not None:
+        if tracker:
+            tracker.save(history_file)
         logger.log(f"\nSaved history to {history_file}")
 
     return AgentRunResult(
