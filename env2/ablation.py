@@ -10,10 +10,10 @@ import json
 
 try:
     from observability import append_run_summary, build_condition_summary, build_run_summary, write_condition_summary
-    from test_pt_agent import run_pt_llm_agent
+    from experiment import run_pt_llm_agent
 except ImportError:
-    from zendo.observability import append_run_summary, build_condition_summary, build_run_summary, write_condition_summary
-    from zendo.test_pt_agent import run_pt_llm_agent
+    from observability import append_run_summary, build_condition_summary, build_run_summary, write_condition_summary
+    from experiment import run_pt_llm_agent
 
 AXES = ["world", "goal", "mechanics", "feedback"]
 BASELINE = "EASY"

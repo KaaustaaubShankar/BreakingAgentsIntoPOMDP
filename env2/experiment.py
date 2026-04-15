@@ -1,11 +1,11 @@
-"""test_pt_agent.py — LLM agent runner for the Parameter Tuning environment.
+"""experiment.py — LLM agent runner for the Parameter Tuning environment.
 
 Mirrors the structure of `test_agent.py` so Env1 and Env2 share the same
 harness conventions while preserving environment-specific actions and prompts.
 
 Usage:
-    python test_pt_agent.py --agent llm --provider openrouter --model openai/gpt-4o
-    python test_pt_agent.py --agent mock
+    python experiment.py --agent llm --provider openrouter --model openai/gpt-4o
+    python experiment.py --agent mock
 """
 
 import argparse
@@ -15,7 +15,7 @@ import re
 from dataclasses import dataclass, field, asdict
 from typing import Any, Dict, List, Optional
 
-from parameter_tuning import (
+from environment import (
     ParameterTuningEnv,
     create_counter_example_generator,
     generate_initial_examples,
