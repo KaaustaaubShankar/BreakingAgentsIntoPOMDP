@@ -30,6 +30,12 @@ try:
 except ImportError:
     pass
 
+try:
+    from epistemic import BeliefStateTracker, extract_candidate_from_text
+    EPISTEMIC_AVAILABLE = True
+except ImportError:
+    EPISTEMIC_AVAILABLE = False
+
 
 class LLMClient:
     OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
@@ -210,6 +216,7 @@ def run_pt_llm_agent(
 
     client = client or LLMClient(provider, model)
     client.reset_usage()
+    tracker = BeliefStateTracker() if EPISTEMIC_AVAILABLE else None
 
     system_prompt = _build_system_prompt(presentation)
     history_log = _build_history_log(presentation)
@@ -233,6 +240,12 @@ def run_pt_llm_agent(
             history_log += f"\nTurn {turns_taken} Error: {msg}\n"
             continue
 
+        # Epistemic tracking: extract NL hypothesis from reasoning text
+        if tracker and llm_response:
+            extracted = extract_candidate_from_text(llm_response)
+            if extracted and not tracker.find_candidate_by_text(extracted):
+                tracker.register_candidate(extracted, turn=turns_taken)
+
         action = action_data.get("action", "").upper()
 
         if action == "SET":
@@ -242,6 +255,11 @@ def run_pt_llm_agent(
             log = f"SET {params} predict={prediction} → {res}"
             logger.log(log)
             history_log += log + "\n"
+            # Epistemic: treat each SET result as evidence for active candidates
+            if tracker:
+                actual = res.get("result") == "Match"
+                tracker.evaluate_strata(params, prediction, actual, turn=turns_taken)
+                tracker.update("strata_match" if prediction == actual else "strata_mismatch", turn=turns_taken)
 
         elif action == "PROPOSE":
             guessed = action_data.get("target", action_data.get("params", {}))
@@ -264,6 +282,11 @@ def run_pt_llm_agent(
             log = f"PROPOSE target={guessed} → {res}"
             logger.log(log)
             history_log += log + "\n"
+            # Epistemic: register proposed target as candidate, update on result
+            if tracker:
+                accepted = res.get("result") == "Accepted"
+                tracker.evaluate_propose(json.dumps(guessed, sort_keys=True), accepted=accepted, turn=turns_taken)
+                tracker.update("propose_accepted" if accepted else "propose_rejected", turn=turns_taken)
 
             if res.get("result") == "Accepted":
                 logger.log("Agent won!")
@@ -285,6 +308,8 @@ def run_pt_llm_agent(
     if save_history:
         history_file = env.save_history()
         logger.log(f"Saved history → {history_file}")
+        if tracker and history_file:
+            tracker.save(history_file)
 
     return PTRunResult(
         agent="llm",

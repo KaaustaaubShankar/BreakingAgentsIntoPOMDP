@@ -152,8 +152,7 @@ class LithicArrayEnv:
     def _get_goal_instruction(self):
         if self.goal == GoalAxis.EASY:
             return "Your goal is to discover the hidden rule that classifies arrangements as Quartz or Shale. State the rule explicitly to win."
-        else: # HARD
-            return ""
+        return ""
 
     def _get_mechanics_instruction(self):
         if self.mechanics == MechanicsAxis.EASY:
@@ -173,8 +172,7 @@ Propose Action Schema (Requires 1 token):
   "rule_description": "All pieces are red",
   "rule_code": "def agent_eval_fn(arr):\n    # arr is an Arrangement obj. You can access shapes via arr.shapes. Each shape has .color, .size, .type_\n    return all(s.color == 'red' for s in arr.shapes)"
 }"""
-        else: # HARD
-            return "Respond with a JSON object containing your action ('STRATA' or 'PROPOSE')."
+        return "Respond with a JSON object containing your action ('STRATA' or 'PROPOSE')."
 
     def _format_arrangement(self, arrangement: Arrangement, label: Optional[bool] = None, filename: str = None) -> Dict[str, Any]:
         result: Dict[str, Any] = {}
@@ -283,11 +281,7 @@ Propose Action Schema (Requires 1 token):
             response = {"result": "Rejected"}
             
             # Determine if we should provide the counter-example based on Feedback Axis
-            provide_ce = False
-            if self.feedback == FeedbackAxis.EASY:
-                provide_ce = True
-            elif self.feedback == FeedbackAxis.HARD:
-                provide_ce = False
+            provide_ce = self.feedback == FeedbackAxis.EASY
                 
             if provide_ce:
                 arr_obj, true_label = counter_example

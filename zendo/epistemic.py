@@ -312,11 +312,27 @@ _HYPOTHESIS_PATTERNS = [
     r"rule_description[\"']?\s*:\s*[\"'](.+?)[\"']",
 ]
 
+# Pattern for PT environment: extract target vector from JSON action output.
+# Matches: "target": {"P1": 3, "P2": 8, ...} in LLM's JSON response.
+_PT_TARGET_PATTERN = r'["\']?target["\']?\s*:\s*(\{[^}]+\})'
+
+
 def extract_candidate_from_text(text: str) -> Optional[str]:
     """
-    Heuristic extraction of a rule hypothesis from LLM natural-language output.
-    Returns the rule text if found, else None.
+    Heuristic extraction of a rule/target hypothesis from LLM output.
+    Handles both environments:
+    - Zendo: natural-language rule descriptions ("I think the rule is...")
+    - PT: target vector from JSON output ({"action": "PROPOSE", "target": {...}})
+    Returns the candidate text if found, else None.
     """
+    # PT environment: look for a target vector in JSON output first
+    m = re.search(_PT_TARGET_PATTERN, text, re.IGNORECASE)
+    if m:
+        candidate_text = m.group(1).strip()
+        if len(candidate_text) > 2:
+            return candidate_text
+
+    # Zendo / natural-language environments
     for pattern in _HYPOTHESIS_PATTERNS:
         m = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
         if m:

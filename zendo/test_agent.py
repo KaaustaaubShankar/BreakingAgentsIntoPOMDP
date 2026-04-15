@@ -23,7 +23,7 @@ from visual_zendo import (
 
 try:
     from dotenv import load_dotenv
-    load_dotenv()
+    load_dotenv(override=True)
 except ImportError:
     pass
 
@@ -35,61 +35,96 @@ except ImportError:
 
 
 class LLMClient:
+    OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+
     def __init__(self, provider: str, model: str):
         self.provider = provider.lower()
         self.model = model
-        self.usage_totals = {
+        self.reset_usage()
+
+    def reset_usage(self):
+        self.last_usage = self._empty_usage_summary()
+        self.usage_totals = self._empty_usage_summary()
+
+    def _empty_usage_summary(self) -> Dict[str, int]:
+        return {
             "input_tokens": 0,
             "output_tokens": 0,
             "total_tokens": 0,
-            "billed_cost_usd": None,
-            "raw_model_cost_usd": None,
+            "calls": 0,
+            "calls_with_usage": 0,
         }
 
-    def _extract_usage(self, response: Any) -> Dict[str, Any]:
+    def _usage_value(self, usage: Any, *keys: str) -> Optional[int]:
+        for key in keys:
+            if isinstance(usage, dict):
+                value = usage.get(key)
+            else:
+                value = getattr(usage, key, None)
+            if value is None:
+                continue
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                continue
+        return None
+
+    def _extract_usage(self, response: Any) -> Dict[str, int]:
         usage = getattr(response, "usage", None)
-        if usage is None and isinstance(response, dict):
-            usage = response.get("usage")
+        input_tokens = self._usage_value(usage, "input_tokens", "prompt_tokens")
+        output_tokens = self._usage_value(usage, "output_tokens", "completion_tokens")
+        total_tokens = self._usage_value(usage, "total_tokens")
+        has_usage = usage is not None and any(
+            value is not None for value in (input_tokens, output_tokens, total_tokens)
+        )
 
-        def _get(obj, *keys):
-            for key in keys:
-                if isinstance(obj, dict) and key in obj:
-                    return obj[key]
-                if hasattr(obj, key):
-                    return getattr(obj, key)
-            return None
-
-        input_tokens = _get(usage, "input_tokens", "prompt_tokens") or 0
-        output_tokens = _get(usage, "output_tokens", "completion_tokens") or 0
-        total_tokens = _get(usage, "total_tokens") or (input_tokens + output_tokens)
+        input_tokens = input_tokens or 0
+        output_tokens = output_tokens or 0
+        total_tokens = total_tokens if total_tokens is not None else input_tokens + output_tokens
 
         return {
-            "input_tokens": int(input_tokens or 0),
-            "output_tokens": int(output_tokens or 0),
-            "total_tokens": int(total_tokens or 0),
-            "billed_cost_usd": _get(usage, "billed_cost_usd"),
-            "raw_model_cost_usd": _get(usage, "raw_model_cost_usd"),
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": total_tokens,
+            "calls": 1,
+            "calls_with_usage": 1 if has_usage else 0,
         }
 
     def _record_usage(self, response: Any):
         usage = self._extract_usage(response)
-        self.usage_totals["input_tokens"] += usage["input_tokens"]
-        self.usage_totals["output_tokens"] += usage["output_tokens"]
-        self.usage_totals["total_tokens"] += usage["total_tokens"]
-        if usage["billed_cost_usd"] is not None:
-            current = self.usage_totals["billed_cost_usd"] or 0.0
-            self.usage_totals["billed_cost_usd"] = current + float(usage["billed_cost_usd"])
-        if usage["raw_model_cost_usd"] is not None:
-            current = self.usage_totals["raw_model_cost_usd"] or 0.0
-            self.usage_totals["raw_model_cost_usd"] = current + float(usage["raw_model_cost_usd"])
+        self.last_usage = usage
+        for key, value in usage.items():
+            self.usage_totals[key] += value
 
-    def get_usage_summary(self) -> Dict[str, Any]:
+    def get_usage_summary(self) -> Dict[str, int]:
         return dict(self.usage_totals)
+
+    def _openrouter_client(self):
+        api_key = os.environ.get("OPENROUTER_API_KEY")
+        if not api_key:
+            raise ValueError("OPENROUTER_API_KEY environment variable is required when using OpenRouter.")
+
+        import openai
+
+        client_kwargs = {
+            "base_url": self.OPENROUTER_BASE_URL,
+            "api_key": api_key,
+        }
+        default_headers = {}
+        referer = os.environ.get("OPENROUTER_HTTP_REFERER")
+        app_title = os.environ.get("OPENROUTER_APP_TITLE")
+        if referer:
+            default_headers["HTTP-Referer"] = referer
+        if app_title:
+            default_headers["X-Title"] = app_title
+        if default_headers:
+            client_kwargs["default_headers"] = default_headers
+
+        return openai.OpenAI(**client_kwargs)
     
     def generate(self, system_prompt: str, user_prompt: str) -> str:
-        if self.provider == "openai":
-            import openai
-            client = openai.OpenAI()
+        if self.provider == "openrouter":
+            client = self._openrouter_client()
             resp = client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
@@ -148,7 +183,7 @@ class AgentRunResult:
     rule_index: Optional[int] = None
     true_rule_name: Optional[str] = None
     understanding: Optional[Dict[str, str]] = None
-    usage: Optional[Dict[str, Any]] = None
+    llm_usage: Optional[Dict[str, int]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -223,6 +258,29 @@ def _save_history(env: LithicArrayEnv, save_history: bool) -> Optional[str]:
     return env.save_history()
 
 
+def _empty_llm_usage_summary() -> Dict[str, int]:
+    return {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "calls": 0,
+        "calls_with_usage": 0,
+    }
+
+
+def _reset_client_usage(client: Any):
+    if hasattr(client, "reset_usage"):
+        client.reset_usage()
+
+
+def _get_client_usage_summary(client: Any) -> Dict[str, int]:
+    if hasattr(client, "get_usage_summary"):
+        usage = client.get_usage_summary()
+        if usage is not None:
+            return usage
+    return _empty_llm_usage_summary()
+
+
 def run_llm_agent(
     provider: str,
     model: str,
@@ -242,6 +300,7 @@ def run_llm_agent(
     logger.log(f"--- Starting LLM Agent ({provider} / {model}) ---")
 
     client = client or LLMClient(provider, model)
+    _reset_client_usage(client)
     tracker = BeliefStateTracker() if EPISTEMIC_AVAILABLE else None
     env, presentation, true_rule_name, _ = _build_environment(
         world=world,
@@ -350,6 +409,19 @@ def run_llm_agent(
         errors.append(msg)
         logger.log(msg)
 
+    llm_usage = _get_client_usage_summary(client)
+    env._log_event("llm_usage_summary", {
+        "provider": provider,
+        "model": model,
+        **llm_usage,
+    })
+    logger.log(
+        "LLM token usage: "
+        f"{llm_usage['input_tokens']} input, "
+        f"{llm_usage['output_tokens']} output "
+        f"across {llm_usage['calls']} calls."
+    )
+
     history_file = _save_history(env, save_history)
     if history_file is not None:
         if tracker:
@@ -371,7 +443,7 @@ def run_llm_agent(
         rule_index=rule_index,
         true_rule_name=true_rule_name,
         understanding=understanding,
-        usage=client.get_usage_summary() if hasattr(client, "get_usage_summary") else None,
+        llm_usage=llm_usage,
     ).to_dict()
 
 
@@ -410,6 +482,12 @@ def run_mock_agent(
     arr3 = generate_random_arrangement()
     env.strata(arr3, true_rule_eval_fn(arr3))
     final_response = env.propose_rule(true_rule_name, true_rule_eval_fn)
+    llm_usage = _empty_llm_usage_summary()
+    env._log_event("llm_usage_summary", {
+        "provider": None,
+        "model": None,
+        **llm_usage,
+    })
 
     history_file = _save_history(env, save_history)
     if history_file is not None:
@@ -426,18 +504,19 @@ def run_mock_agent(
         logs=logger.messages,
         rule_index=rule_index,
         true_rule_name=true_rule_name,
+        llm_usage=llm_usage,
     ).to_dict()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Test Agent for Lithic Array")
     parser.add_argument("--agent", type=str, choices=["mock", "llm"], default="llm", help="Choose 'mock' for local rules or 'llm' for AI agent.")
-    parser.add_argument("--provider", type=str, choices=["openai", "anthropic", "gemini"], default="openai", help="LLM Provider")
-    parser.add_argument("--model", type=str, default="gpt-4o", help="Model name (e.g. gpt-4o, claude-3-5-sonnet-20241022, gemini-2.0-flash)")
+    parser.add_argument("--provider", type=str, choices=["openrouter"], default="openrouter", help="LLM Provider")
+    parser.add_argument("--model", type=str, default="openai/gpt-4o", help="OpenRouter model name (e.g. openai/gpt-4o)")
     parser.add_argument("--turns", type=int, default=100, help="Max interaction turns for LLM")
-    parser.add_argument("--world", type=str, default="EASY", help="Axis level: easy, medium, hard/high.")
-    parser.add_argument("--goal", type=str, default="EASY", help="Axis level: easy, medium, hard/high.")
-    parser.add_argument("--mechanics", type=str, default="EASY", help="Axis level: easy, medium, hard/high.")
-    parser.add_argument("--feedback", type=str, default="EASY", help="Axis level: easy, medium, hard/high.")
+    parser.add_argument("--world", type=str, default="EASY", help="Axis level: easy or hard/high.")
+    parser.add_argument("--goal", type=str, default="EASY", help="Axis level: easy or hard/high.")
+    parser.add_argument("--mechanics", type=str, default="EASY", help="Axis level: easy or hard/high.")
+    parser.add_argument("--feedback", type=str, default="EASY", help="Axis level: easy or hard/high.")
     parser.add_argument("--rule-index", type=int, default=1, help="Index of the rule to evaluate from rules.py")
     parser.add_argument("--quiet", action="store_true", help="Suppress step-by-step terminal logging.")
     

@@ -6,7 +6,6 @@ from observability import append_run_summary, build_condition_summary, build_run
 from test_agent import run_llm_agent
 
 AXES = ["world", "goal", "mechanics", "feedback"]
-LEVELS = ["EASY", "MEDIUM", "HARD"]
 BASELINE = "EASY"
 SINGLE_AXIS_HARD = "single-axis-hard"
 MONDAY_ALIAS = "monday-alias"
@@ -31,6 +30,7 @@ def run_experiment(provider, model, turns, config, rule_index, runner=run_llm_ag
             "history_file": result["history_file"],
             "success": True,
             "turns_taken": result["turns_taken"],
+            "llm_usage": result.get("llm_usage"),
             "errors": result.get("errors", []),
         }
     except Exception as e:
@@ -47,8 +47,8 @@ def run_experiment(provider, model, turns, config, rule_index, runner=run_llm_ag
 def main():
     date = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     parser = argparse.ArgumentParser(description="Run single-axis ablation on Lithic Array")
-    parser.add_argument("--provider", type=str, choices=["openai", "anthropic", "gemini"], default="openai")
-    parser.add_argument("--model", type=str, default="gpt-4o", help="Model name (e.g. gpt-4o, claude-3-5-sonnet-20241022)")
+    parser.add_argument("--provider", type=str, choices=["openrouter"], default="openrouter")
+    parser.add_argument("--model", type=str, default="openai/gpt-4o", help="OpenRouter model name (e.g. openai/gpt-4o)")
     parser.add_argument("--turns", type=int, default=50, help="Max interaction turns per game")
     parser.add_argument("--runs", type=int, default=1, help="Number of runs per configuration")
     parser.add_argument("--matrix", choices=[SINGLE_AXIS_HARD, MONDAY_ALIAS], default=SINGLE_AXIS_HARD, help="single-axis-hard preserves Kaus's ladder, monday-alias uses knockout naming on the same HARD-only configs")
@@ -63,12 +63,10 @@ def main():
     # Preserve Kaus's later structure: baseline + HARD-only single-axis runs.
     # Monday alias only changes naming, not semantics.
     for axis in AXES:
-        config = base_config.copy()
-        config[axis] = "HARD"
-        experiment_name = f"{axis}_HARD"
-        if args.matrix == MONDAY_ALIAS:
-            experiment_name = f"{axis}_knockout"
-        configs_to_run.append((experiment_name, config))
+        for level in ["HARD"]:
+            config = base_config.copy()
+            config[axis] = level
+            configs_to_run.append((f"{axis}_{level}", config))
             
     results = []
     run_summaries = []
