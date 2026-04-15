@@ -67,8 +67,11 @@ def rule_9(seq: str) -> Label:
 
 
 def rule_10(seq: str) -> Label:
-    """R if the 2nd character (index 1) is alphabetically earlier than the 4th character (index 3)."""
-    return "R" if seq[1] < seq[3] else "L"
+    """R if the number of descending adjacent pairs is odd AND the sequence contains at least one vowel.
+    (Conjunctive: directional flow parity + lexical class — two orthogonal features to discover.)"""
+    descending_pairs = sum(seq[i] > seq[i + 1] for i in range(len(seq) - 1))
+    has_vowel = any(c in VOWELS for c in seq)
+    return "R" if (descending_pairs % 2 == 1 and has_vowel) else "L"
 
 
 RULES = {
