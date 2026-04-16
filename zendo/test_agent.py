@@ -183,6 +183,7 @@ class AgentRunResult:
     rule_index: Optional[int] = None
     true_rule_name: Optional[str] = None
     understanding: Optional[Dict[str, str]] = None
+    usage: Optional[Dict[str, int]] = None
     llm_usage: Optional[Dict[str, int]] = None
 
     def to_dict(self) -> Dict[str, Any]:
@@ -443,6 +444,7 @@ def run_llm_agent(
         rule_index=rule_index,
         true_rule_name=true_rule_name,
         understanding=understanding,
+        usage=llm_usage,
         llm_usage=llm_usage,
     ).to_dict()
 
@@ -504,6 +506,7 @@ def run_mock_agent(
         logs=logger.messages,
         rule_index=rule_index,
         true_rule_name=true_rule_name,
+        usage=llm_usage,
         llm_usage=llm_usage,
     ).to_dict()
 
