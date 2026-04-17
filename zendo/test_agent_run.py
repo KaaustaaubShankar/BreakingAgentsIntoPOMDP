@@ -67,11 +67,13 @@ class RunLLMAgentUsageTests(unittest.TestCase):
                     "calls_with_usage": 2,
                 },
             )
+            self.assertEqual(result["usage"], result["llm_usage"])
 
             with open(result["history_file"], "r") as f:
                 history = json.load(f)
 
-            usage_events = [entry for entry in history if entry["event"] == "llm_usage_summary"]
+            events = history["events"] if isinstance(history, dict) else history
+            usage_events = [entry for entry in events if entry["event"] == "llm_usage_summary"]
             self.assertEqual(len(usage_events), 1)
             self.assertEqual(
                 usage_events[0]["data"],

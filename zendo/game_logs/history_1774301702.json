@@ -1,0 +1,1089 @@
+[
+  {
+    "timestamp": 1774301487.451466,
+    "event": "episode_start",
+    "data": {
+      "axes": {
+        "world": "EASY",
+        "goal": "EASY",
+        "mechanics": "EASY",
+        "feedback": "EASY"
+      },
+      "true_rule": "All pieces are the same color"
+    }
+  },
+  {
+    "timestamp": 1774301487.4515479,
+    "event": "initial_presentation",
+    "data": {
+      "instruction": "Your goal is to discover the hidden rule that classifies arrangements as Quartz or Shale. State the rule explicitly to win.",
+      "mechanics": "You may query arrangements via Strata (submit arrangement + predicted classification). Matches earn 1 token. You can spend tokens to propose a rule. The Basalt provides counter-examples on failed proposals.\n\nYou must respond with only a JSON block containing your action. Do not include markdown or other text outside the JSON.\nStrata Action Schema:\n{\n  \"action\": \"STRATA\",\n  \"arrangement\": [{\"color\": \"red\", \"size\": \"small\", \"type_\": \"circle\"}],\n  \"prediction\": true  // true for Quartz, false for Shale\n}\n\nPropose Action Schema (Requires 1 token):\n{\n  \"action\": \"PROPOSE\",\n  \"rule_description\": \"All pieces are red\",\n  \"rule_code\": \"def agent_eval_fn(arr):\n    # arr is an Arrangement obj. You can access shapes via arr.shapes. Each shape has .color, .size, .type_\n    return all(s.color == 'red' for s in arr.shapes)\"\n}",
+      "initial_examples": [
+        {
+          "representation": [
+            {
+              "color": "yellow",
+              "size": "small",
+              "type_": "triangle"
+            },
+            {
+              "color": "red",
+              "size": "medium",
+              "type_": "square"
+            },
+            {
+              "color": "yellow",
+              "size": "medium",
+              "type_": "triangle"
+            },
+            {
+              "color": "blue",
+              "size": "large",
+              "type_": "circle"
+            },
+            {
+              "color": "red",
+              "size": "small",
+              "type_": "square"
+            }
+          ],
+          "label": "Shale"
+        },
+        {
+          "representation": [
+            {
+              "color": "blue",
+              "size": "medium",
+              "type_": "triangle"
+            }
+          ],
+          "label": "Quartz"
+        },
+        {
+          "representation": [
+            {
+              "color": "red",
+              "size": "large",
+              "type_": "circle"
+            }
+          ],
+          "label": "Quartz"
+        },
+        {
+          "representation": [
+            {
+              "color": "black",
+              "size": "large",
+              "type_": "triangle"
+            },
+            {
+              "color": "green",
+              "size": "small",
+              "type_": "square"
+            },
+            {
+              "color": "black",
+              "size": "medium",
+              "type_": "triangle"
+            }
+          ],
+          "label": "Shale"
+        },
+        {
+          "representation": [
+            {
+              "color": "black",
+              "size": "large",
+              "type_": "square"
+            }
+          ],
+          "label": "Quartz"
+        },
+        {
+          "representation": [
+            {
+              "color": "green",
+              "size": "large",
+              "type_": "square"
+            },
+            {
+              "color": "black",
+              "size": "medium",
+              "type_": "triangle"
+            },
+            {
+              "color": "yellow",
+              "size": "large",
+              "type_": "circle"
+            },
+            {
+              "color": "blue",
+              "size": "large",
+              "type_": "square"
+            }
+          ],
+          "label": "Shale"
+        }
+      ]
+    }
+  },
+  {
+    "timestamp": 1774301488.995417,
+    "event": "strata_query",
+    "data": {
+      "arrangement": [
+        {
+          "color": "black",
+          "size": "small",
+          "type_": "circle"
+        }
+      ],
+      "predicted": true,
+      "actual": true,
+      "match": true,
+      "response": {
+        "correct_label": "Quartz",
+        "feedback": "Match! You earned 1 token.",
+        "tokens_current": 1
+      }
+    }
+  },
+  {
+    "timestamp": 1774301490.4392052,
+    "event": "propose_rule_rejected",
+    "data": {
+      "proposed_rule": "Arrangements with only one shape with a large size are Quartz.",
+      "response": {
+        "result": "Rejected",
+        "counter_example": {
+          "arrangement": [
+            {
+              "color": "green",
+              "size": "small",
+              "type_": "square"
+            }
+          ],
+          "basalt_label": "Quartz",
+          "your_rule_predicted": "Shale",
+          "message": "This arrangement satisfies the Basalt's rule but not yours, or vice versa."
+        }
+      }
+    }
+  },
+  {
+    "timestamp": 1774301491.4461381,
+    "event": "strata_query",
+    "data": {
+      "arrangement": [
+        {
+          "color": "blue",
+          "size": "large",
+          "type_": "triangle"
+        }
+      ],
+      "predicted": true,
+      "actual": true,
+      "match": true,
+      "response": {
+        "correct_label": "Quartz",
+        "feedback": "Match! You earned 1 token.",
+        "tokens_current": 1
+      }
+    }
+  },
+  {
+    "timestamp": 1774301493.0859709,
+    "event": "strata_query",
+    "data": {
+      "arrangement": [
+        {
+          "color": "red",
+          "size": "medium",
+          "type_": "circle"
+        },
+        {
+          "color": "red",
+          "size": "large",
+          "type_": "triangle"
+        }
+      ],
+      "predicted": true,
+      "actual": true,
+      "match": true,
+      "response": {
+        "correct_label": "Quartz",
+        "feedback": "Match! You earned 1 token.",
+        "tokens_current": 2
+      }
+    }
+  },
+  {
+    "timestamp": 1774301494.309669,
+    "event": "propose_rule_rejected",
+    "data": {
+      "proposed_rule": "Arrangements with any blue shape are Quartz.",
+      "response": {
+        "result": "Rejected",
+        "counter_example": {
+          "arrangement": [
+            {
+              "color": "yellow",
+              "size": "large",
+              "type_": "square"
+            },
+            {
+              "color": "blue",
+              "size": "small",
+              "type_": "circle"
+            }
+          ],
+          "basalt_label": "Shale",
+          "your_rule_predicted": "Quartz",
+          "message": "This arrangement satisfies the Basalt's rule but not yours, or vice versa."
+        }
+      }
+    }
+  },
+  {
+    "timestamp": 1774301495.851705,
+    "event": "strata_query",
+    "data": {
+      "arrangement": [
+        {
+          "color": "yellow",
+          "size": "medium",
+          "type_": "circle"
+        }
+      ],
+      "predicted": true,
+      "actual": true,
+      "match": true,
+      "response": {
+        "correct_label": "Quartz",
+        "feedback": "Match! You earned 1 token.",
+        "tokens_current": 2
+      }
+    }
+  },
+  {
+    "timestamp": 1774301497.077309,
+    "event": "strata_query",
+    "data": {
+      "arrangement": [
+        {
+          "color": "red",
+          "size": "medium",
+          "type_": "circle"
+        },
+        {
+          "color": "yellow",
+          "size": "medium",
+          "type_": "circle"
+        }
+      ],
+      "predicted": true,
+      "actual": false,
+      "match": false,
+      "response": {
+        "correct_label": "Shale",
+        "feedback": "Mismatch. No token earned.",
+        "tokens_current": 2
+      }
+    }
+  },
+  {
+    "timestamp": 1774301498.666944,
+    "event": "strata_query",
+    "data": {
+      "arrangement": [
+        {
+          "color": "green",
+          "size": "small",
+          "type_": "circle"
+        }
+      ],
+      "predicted": true,
+      "actual": true,
+      "match": true,
+      "response": {
+        "correct_label": "Quartz",
+        "feedback": "Match! You earned 1 token.",
+        "tokens_current": 3
+      }
+    }
+  },
+  {
+    "timestamp": 1774301500.289744,
+    "event": "propose_rule_rejected",
+    "data": {
+      "proposed_rule": "Arrangements with all pieces as circles are Quartz.",
+      "response": {
+        "result": "Rejected",
+        "counter_example": {
+          "arrangement": [
+            {
+              "color": "blue",
+              "size": "small",
+              "type_": "square"
+            }
+          ],
+          "basalt_label": "Quartz",
+          "your_rule_predicted": "Shale",
+          "message": "This arrangement satisfies the Basalt's rule but not yours, or vice versa."
+        }
+      }
+    }
+  },
+  {
+    "timestamp": 1774301501.5549388,
+    "event": "strata_query",
+    "data": {
+      "arrangement": [
+        {
+          "color": "green",
+          "size": "medium",
+          "type_": "triangle"
+        }
+      ],
+      "predicted": true,
+      "actual": true,
+      "match": true,
+      "response": {
+        "correct_label": "Quartz",
+        "feedback": "Match! You earned 1 token.",
+        "tokens_current": 3
+      }
+    }
+  },
+  {
+    "timestamp": 1774301502.9873862,
+    "event": "strata_query",
+    "data": {
+      "arrangement": [
+        {
+          "color": "red",
+          "size": "small",
+          "type_": "triangle"
+        }
+      ],
+      "predicted": true,
+      "actual": true,
+      "match": true,
+      "response": {
+        "correct_label": "Quartz",
+        "feedback": "Match! You earned 1 token.",
+        "tokens_current": 4
+      }
+    }
+  },
+  {
+    "timestamp": 1774301507.7516532,
+    "event": "propose_rule_rejected",
+    "data": {
+      "proposed_rule": "If the arrangement has only one shape, it is Quartz. Otherwise, it is Shale.",
+      "response": {
+        "result": "Rejected",
+        "counter_example": {
+          "arrangement": [
+            {
+              "color": "black",
+              "size": "large",
+              "type_": "triangle"
+            },
+            {
+              "color": "black",
+              "size": "medium",
+              "type_": "square"
+            }
+          ],
+          "basalt_label": "Quartz",
+          "your_rule_predicted": "Shale",
+          "message": "This arrangement satisfies the Basalt's rule but not yours, or vice versa."
+        }
+      }
+    }
+  },
+  {
+    "timestamp": 1774301510.2848158,
+    "event": "strata_query",
+    "data": {
+      "arrangement": [
+        {
+          "color": "yellow",
+          "size": "small",
+          "type_": "circle"
+        }
+      ],
+      "predicted": true,
+      "actual": true,
+      "match": true,
+      "response": {
+        "correct_label": "Quartz",
+        "feedback": "Match! You earned 1 token.",
+        "tokens_current": 4
+      }
+    }
+  },
+  {
+    "timestamp": 1774301514.189502,
+    "event": "strata_query",
+    "data": {
+      "arrangement": [
+        {
+          "color": "blue",
+          "size": "large",
+          "type_": "square"
+        }
+      ],
+      "predicted": true,
+      "actual": true,
+      "match": true,
+      "response": {
+        "correct_label": "Quartz",
+        "feedback": "Match! You earned 1 token.",
+        "tokens_current": 5
+      }
+    }
+  },
+  {
+    "timestamp": 1774301518.2755141,
+    "event": "propose_rule_rejected",
+    "data": {
+      "proposed_rule": "Arrangements where all shapes are either large or medium are Quartz.",
+      "response": {
+        "result": "Rejected",
+        "counter_example": {
+          "arrangement": [
+            {
+              "color": "black",
+              "size": "large",
+              "type_": "circle"
+            },
+            {
+              "color": "red",
+              "size": "large",
+              "type_": "square"
+            },
+            {
+              "color": "green",
+              "size": "medium",
+              "type_": "square"
+            }
+          ],
+          "basalt_label": "Shale",
+          "your_rule_predicted": "Quartz",
+          "message": "This arrangement satisfies the Basalt's rule but not yours, or vice versa."
+        }
+      }
+    }
+  },
+  {
+    "timestamp": 1774301523.189106,
+    "event": "strata_query",
+    "data": {
+      "arrangement": [
+        {
+          "color": "red",
+          "size": "large",
+          "type_": "square"
+        }
+      ],
+      "predicted": true,
+      "actual": true,
+      "match": true,
+      "response": {
+        "correct_label": "Quartz",
+        "feedback": "Match! You earned 1 token.",
+        "tokens_current": 5
+      }
+    }
+  },
+  {
+    "timestamp": 1774301526.616412,
+    "event": "strata_query",
+    "data": {
+      "arrangement": [
+        {
+          "color": "yellow",
+          "size": "large",
+          "type_": "circle"
+        }
+      ],
+      "predicted": true,
+      "actual": true,
+      "match": true,
+      "response": {
+        "correct_label": "Quartz",
+        "feedback": "Match! You earned 1 token.",
+        "tokens_current": 6
+      }
+    }
+  },
+  {
+    "timestamp": 1774301532.410197,
+    "event": "propose_rule_rejected",
+    "data": {
+      "proposed_rule": "Arrangements with any shape that is large and a circle are Quartz",
+      "response": {
+        "result": "Rejected",
+        "counter_example": {
+          "arrangement": [
+            {
+              "color": "black",
+              "size": "medium",
+              "type_": "circle"
+            },
+            {
+              "color": "black",
+              "size": "medium",
+              "type_": "triangle"
+            },
+            {
+              "color": "yellow",
+              "size": "large",
+              "type_": "triangle"
+            },
+            {
+              "color": "green",
+              "size": "large",
+              "type_": "square"
+            },
+            {
+              "color": "red",
+              "size": "large",
+              "type_": "circle"
+            }
+          ],
+          "basalt_label": "Shale",
+          "your_rule_predicted": "Quartz",
+          "message": "This arrangement satisfies the Basalt's rule but not yours, or vice versa."
+        }
+      }
+    }
+  },
+  {
+    "timestamp": 1774301537.831296,
+    "event": "strata_query",
+    "data": {
+      "arrangement": [
+        {
+          "color": "green",
+          "size": "large",
+          "type_": "circle"
+        }
+      ],
+      "predicted": true,
+      "actual": true,
+      "match": true,
+      "response": {
+        "correct_label": "Quartz",
+        "feedback": "Match! You earned 1 token.",
+        "tokens_current": 6
+      }
+    }
+  },
+  {
+    "timestamp": 1774301543.0548182,
+    "event": "propose_rule_rejected",
+    "data": {
+      "proposed_rule": "Arrangements where all shapes are circles or all shapes are triangles are Quartz.",
+      "response": {
+        "result": "Rejected",
+        "counter_example": {
+          "arrangement": [
+            {
+              "color": "blue",
+              "size": "medium",
+              "type_": "square"
+            },
+            {
+              "color": "blue",
+              "size": "large",
+              "type_": "circle"
+            },
+            {
+              "color": "blue",
+              "size": "medium",
+              "type_": "circle"
+            }
+          ],
+          "basalt_label": "Quartz",
+          "your_rule_predicted": "Shale",
+          "message": "This arrangement satisfies the Basalt's rule but not yours, or vice versa."
+        }
+      }
+    }
+  },
+  {
+    "timestamp": 1774301547.556973,
+    "event": "propose_rule_rejected",
+    "data": {
+      "proposed_rule": "Arrangements where all shapes are circles are Quartz",
+      "response": {
+        "result": "Rejected",
+        "counter_example": {
+          "arrangement": [
+            {
+              "color": "yellow",
+              "size": "large",
+              "type_": "square"
+            }
+          ],
+          "basalt_label": "Quartz",
+          "your_rule_predicted": "Shale",
+          "message": "This arrangement satisfies the Basalt's rule but not yours, or vice versa."
+        }
+      }
+    }
+  },
+  {
+    "timestamp": 1774301558.110416,
+    "event": "propose_rule_rejected",
+    "data": {
+      "proposed_rule": "An arrangement is Quartz if there is at least one shape that is a circle along with at least one shape that is blue.",
+      "response": {
+        "result": "Rejected",
+        "counter_example": {
+          "arrangement": [
+            {
+              "color": "yellow",
+              "size": "medium",
+              "type_": "circle"
+            },
+            {
+              "color": "blue",
+              "size": "small",
+              "type_": "circle"
+            },
+            {
+              "color": "blue",
+              "size": "large",
+              "type_": "triangle"
+            },
+            {
+              "color": "black",
+              "size": "large",
+              "type_": "triangle"
+            }
+          ],
+          "basalt_label": "Shale",
+          "your_rule_predicted": "Quartz",
+          "message": "This arrangement satisfies the Basalt's rule but not yours, or vice versa."
+        }
+      }
+    }
+  },
+  {
+    "timestamp": 1774301561.486549,
+    "event": "strata_query",
+    "data": {
+      "arrangement": [
+        {
+          "color": "black",
+          "size": "large",
+          "type_": "circle"
+        }
+      ],
+      "predicted": true,
+      "actual": true,
+      "match": true,
+      "response": {
+        "correct_label": "Quartz",
+        "feedback": "Match! You earned 1 token.",
+        "tokens_current": 4
+      }
+    }
+  },
+  {
+    "timestamp": 1774301565.8907242,
+    "event": "propose_rule_rejected",
+    "data": {
+      "proposed_rule": "An arrangement is Quartz if it contains at least one shape that is either black or yellow.",
+      "response": {
+        "result": "Rejected",
+        "counter_example": {
+          "arrangement": [
+            {
+              "color": "red",
+              "size": "medium",
+              "type_": "triangle"
+            },
+            {
+              "color": "yellow",
+              "size": "medium",
+              "type_": "square"
+            }
+          ],
+          "basalt_label": "Shale",
+          "your_rule_predicted": "Quartz",
+          "message": "This arrangement satisfies the Basalt's rule but not yours, or vice versa."
+        }
+      }
+    }
+  },
+  {
+    "timestamp": 1774301572.750177,
+    "event": "strata_query",
+    "data": {
+      "arrangement": [
+        {
+          "color": "red",
+          "size": "small",
+          "type_": "square"
+        },
+        {
+          "color": "blue",
+          "size": "large",
+          "type_": "triangle"
+        },
+        {
+          "color": "yellow",
+          "size": "medium",
+          "type_": "circle"
+        }
+      ],
+      "predicted": true,
+      "actual": false,
+      "match": false,
+      "response": {
+        "correct_label": "Shale",
+        "feedback": "Mismatch. No token earned.",
+        "tokens_current": 3
+      }
+    }
+  },
+  {
+    "timestamp": 1774301579.808361,
+    "event": "strata_query",
+    "data": {
+      "arrangement": [
+        {
+          "color": "black",
+          "size": "medium",
+          "type_": "circle"
+        }
+      ],
+      "predicted": true,
+      "actual": true,
+      "match": true,
+      "response": {
+        "correct_label": "Quartz",
+        "feedback": "Match! You earned 1 token.",
+        "tokens_current": 4
+      }
+    }
+  },
+  {
+    "timestamp": 1774301586.5187929,
+    "event": "strata_query",
+    "data": {
+      "arrangement": [
+        {
+          "color": "yellow",
+          "size": "small",
+          "type_": "triangle"
+        }
+      ],
+      "predicted": false,
+      "actual": true,
+      "match": false,
+      "response": {
+        "correct_label": "Quartz",
+        "feedback": "Mismatch. No token earned.",
+        "tokens_current": 4
+      }
+    }
+  },
+  {
+    "timestamp": 1774301594.1543522,
+    "event": "strata_query",
+    "data": {
+      "arrangement": [
+        {
+          "color": "green",
+          "size": "large",
+          "type_": "triangle"
+        }
+      ],
+      "predicted": true,
+      "actual": true,
+      "match": true,
+      "response": {
+        "correct_label": "Quartz",
+        "feedback": "Match! You earned 1 token.",
+        "tokens_current": 5
+      }
+    }
+  },
+  {
+    "timestamp": 1774301601.666861,
+    "event": "propose_rule_rejected",
+    "data": {
+      "proposed_rule": "Arrangements with at least one shape that is a circle are Quartz",
+      "response": {
+        "result": "Rejected",
+        "counter_example": {
+          "arrangement": [
+            {
+              "color": "green",
+              "size": "medium",
+              "type_": "circle"
+            },
+            {
+              "color": "blue",
+              "size": "medium",
+              "type_": "circle"
+            },
+            {
+              "color": "yellow",
+              "size": "small",
+              "type_": "circle"
+            },
+            {
+              "color": "green",
+              "size": "small",
+              "type_": "square"
+            }
+          ],
+          "basalt_label": "Shale",
+          "your_rule_predicted": "Quartz",
+          "message": "This arrangement satisfies the Basalt's rule but not yours, or vice versa."
+        }
+      }
+    }
+  },
+  {
+    "timestamp": 1774301609.510724,
+    "event": "strata_query",
+    "data": {
+      "arrangement": [
+        {
+          "color": "black",
+          "size": "small",
+          "type_": "square"
+        }
+      ],
+      "predicted": true,
+      "actual": true,
+      "match": true,
+      "response": {
+        "correct_label": "Quartz",
+        "feedback": "Match! You earned 1 token.",
+        "tokens_current": 5
+      }
+    }
+  },
+  {
+    "timestamp": 1774301617.60173,
+    "event": "propose_rule_rejected",
+    "data": {
+      "proposed_rule": "Arrangements with at least one black shape are Quartz.",
+      "response": {
+        "result": "Rejected",
+        "counter_example": {
+          "arrangement": [
+            {
+              "color": "yellow",
+              "size": "medium",
+              "type_": "circle"
+            }
+          ],
+          "basalt_label": "Quartz",
+          "your_rule_predicted": "Shale",
+          "message": "This arrangement satisfies the Basalt's rule but not yours, or vice versa."
+        }
+      }
+    }
+  },
+  {
+    "timestamp": 1774301626.463705,
+    "event": "strata_query",
+    "data": {
+      "arrangement": [
+        {
+          "color": "black",
+          "size": "large",
+          "type_": "square"
+        }
+      ],
+      "predicted": true,
+      "actual": true,
+      "match": true,
+      "response": {
+        "correct_label": "Quartz",
+        "feedback": "Match! You earned 1 token.",
+        "tokens_current": 5
+      }
+    }
+  },
+  {
+    "timestamp": 1774301627.6396768,
+    "event": "strata_query",
+    "data": {
+      "arrangement": [
+        {
+          "color": "green",
+          "size": "small",
+          "type_": "square"
+        }
+      ],
+      "predicted": true,
+      "actual": true,
+      "match": true,
+      "response": {
+        "correct_label": "Quartz",
+        "feedback": "Match! You earned 1 token.",
+        "tokens_current": 6
+      }
+    }
+  },
+  {
+    "timestamp": 1774301643.712427,
+    "event": "strata_query",
+    "data": {
+      "arrangement": [
+        {
+          "color": "green",
+          "size": "medium",
+          "type_": "circle"
+        }
+      ],
+      "predicted": true,
+      "actual": true,
+      "match": true,
+      "response": {
+        "correct_label": "Quartz",
+        "feedback": "Match! You earned 1 token.",
+        "tokens_current": 7
+      }
+    }
+  },
+  {
+    "timestamp": 1774301653.443073,
+    "event": "propose_rule_rejected",
+    "data": {
+      "proposed_rule": "Arrangements are Quartz if each shape in the arrangement has a unique type. Otherwise, it is Shale.",
+      "response": {
+        "result": "Rejected",
+        "counter_example": {
+          "arrangement": [
+            {
+              "color": "blue",
+              "size": "large",
+              "type_": "circle"
+            },
+            {
+              "color": "red",
+              "size": "small",
+              "type_": "triangle"
+            }
+          ],
+          "basalt_label": "Shale",
+          "your_rule_predicted": "Quartz",
+          "message": "This arrangement satisfies the Basalt's rule but not yours, or vice versa."
+        }
+      }
+    }
+  },
+  {
+    "timestamp": 1774301662.6374369,
+    "event": "strata_query",
+    "data": {
+      "arrangement": [
+        {
+          "color": "yellow",
+          "size": "small",
+          "type_": "square"
+        }
+      ],
+      "predicted": true,
+      "actual": true,
+      "match": true,
+      "response": {
+        "correct_label": "Quartz",
+        "feedback": "Match! You earned 1 token.",
+        "tokens_current": 7
+      }
+    }
+  },
+  {
+    "timestamp": 1774301673.7652512,
+    "event": "propose_rule_rejected",
+    "data": {
+      "proposed_rule": "Arrangements are Quartz if they contain at least one shape that is either a circle or a triangle, but not exclusively squares.",
+      "response": {
+        "result": "Rejected",
+        "counter_example": {
+          "arrangement": [
+            {
+              "color": "green",
+              "size": "small",
+              "type_": "circle"
+            },
+            {
+              "color": "black",
+              "size": "large",
+              "type_": "triangle"
+            },
+            {
+              "color": "red",
+              "size": "medium",
+              "type_": "circle"
+            },
+            {
+              "color": "red",
+              "size": "medium",
+              "type_": "triangle"
+            },
+            {
+              "color": "green",
+              "size": "small",
+              "type_": "circle"
+            }
+          ],
+          "basalt_label": "Shale",
+          "your_rule_predicted": "Quartz",
+          "message": "This arrangement satisfies the Basalt's rule but not yours, or vice versa."
+        }
+      }
+    }
+  },
+  {
+    "timestamp": 1774301682.721539,
+    "event": "propose_rule_rejected",
+    "data": {
+      "proposed_rule": "An arrangement is Quartz if there is at least one shape that is small or medium. Otherwise, it is Shale.",
+      "response": {
+        "result": "Rejected",
+        "counter_example": {
+          "arrangement": [
+            {
+              "color": "green",
+              "size": "small",
+              "type_": "triangle"
+            },
+            {
+              "color": "black",
+              "size": "large",
+              "type_": "triangle"
+            }
+          ],
+          "basalt_label": "Shale",
+          "your_rule_predicted": "Quartz",
+          "message": "This arrangement satisfies the Basalt's rule but not yours, or vice versa."
+        }
+      }
+    }
+  },
+  {
+    "timestamp": 1774301694.0049121,
+    "event": "propose_rule_success",
+    "data": {
+      "proposed_rule": "Arrangements with one shape or where all shapes have the same color are Quartz.",
+      "response": {
+        "result": "Accepted",
+        "message": "Congratulations! You have discovered the hidden rule."
+      }
+    }
+  }
+]
