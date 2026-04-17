@@ -30,8 +30,12 @@ def run_experiment(provider, model, turns, config, rule_index, runner=run_llm_ag
             "history_file": result["history_file"],
             "success": True,
             "turns_taken": result["turns_taken"],
-            "llm_usage": result.get("llm_usage"),
             "errors": result.get("errors", []),
+            "usage": result.get("usage", result.get("llm_usage")),
+            "provider": result.get("provider"),
+            "model": result.get("model"),
+            "true_rule_name": result.get("true_rule_name"),
+            "rule_index": result.get("rule_index"),
         }
     except Exception as e:
         print(f"Error running config: {config}")
@@ -41,7 +45,11 @@ def run_experiment(provider, model, turns, config, rule_index, runner=run_llm_ag
             "won": False,
             "history_file": None,
             "success": False,
-            "error": str(e)
+            "error": str(e),
+            "errors": [str(e)],
+            "provider": provider,
+            "model": model,
+            "rule_index": rule_index,
         }
 
 def main():
@@ -63,10 +71,12 @@ def main():
     # Preserve Kaus's later structure: baseline + HARD-only single-axis runs.
     # Monday alias only changes naming, not semantics.
     for axis in AXES:
-        for level in ["HARD"]:
-            config = base_config.copy()
-            config[axis] = level
-            configs_to_run.append((f"{axis}_{level}", config))
+        config = base_config.copy()
+        config[axis] = "HARD"
+        experiment_name = f"{axis}_HARD"
+        if args.matrix == MONDAY_ALIAS:
+            experiment_name = f"{axis}_knockout"
+        configs_to_run.append((experiment_name, config))
             
     results = []
     run_summaries = []
@@ -89,6 +99,7 @@ def main():
                     experiment_name=name,
                     config=config,
                     run_index=i,
+                    environment="env1",
                 )
                 append_run_summary(summary)
                 run_summaries.append(summary)
