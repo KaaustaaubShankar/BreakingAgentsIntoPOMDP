@@ -134,11 +134,23 @@ def get_structured_state(env: Any, frame_data: FrameDataRaw) -> dict[str, Any]:
     # Stamina refill tiles
     stamina_refills = tile_positions("npxgalaybz")
 
+    # Blocked directions — check adjacent cells in the frame for walls (color index 0)
+    px, py = int(game.gudziatsk.x), int(game.gudziatsk.y)
+    blocked: list[str] = []
+    if frame_data.frame:
+        frame = frame_data.frame[-1]
+        h, w = frame.shape
+        if py > 0     and int(frame[py - 1, px]) == 0: blocked.append("NORTH")
+        if py < h - 1 and int(frame[py + 1, px]) == 0: blocked.append("SOUTH")
+        if px > 0     and int(frame[py, px - 1]) == 0: blocked.append("WEST")
+        if px < w - 1 and int(frame[py, px + 1]) == 0: blocked.append("EAST")
+
     return {
         "player": {
-            "position": [int(game.gudziatsk.x), int(game.gudziatsk.y)],
+            "position": [px, py],
             "lives": lives,
             "stamina": stamina,
+            "blocked_directions": blocked,
         },
         "piece": {
             "shape": shape_idx,

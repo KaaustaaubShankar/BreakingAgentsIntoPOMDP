@@ -58,7 +58,7 @@ from prompts import (
 RESULTS_DIR = Path("results")
 RESULTS_DIR.mkdir(exist_ok=True)
 
-MAX_TURNS = 50
+TURNS_PER_LEVEL = 100
 
 ACTION_MAP: dict[str, GameAction] = {
     "MOVE_NORTH": GameAction.ACTION1,
@@ -85,6 +85,8 @@ class RunResult:
     history: list[dict[str, Any]] = field(default_factory=list)
     understanding: dict[str, str] = field(default_factory=dict)
     timestamp: str = ""
+    wall_collisions: int = 0
+    goals_ever_activated: int = 0  # distinct goals whose requirements were ever matched
 
 
 # ── Save helper ───────────────────────────────────────────────────────────────
@@ -107,6 +109,8 @@ def save_result(result: RunResult, run_id: Optional[str] = None) -> Path:
         "timestamp": result.timestamp,
         "errors": result.errors,
         "understanding": result.understanding,
+        "wall_collisions": result.wall_collisions,
+        "goals_ever_activated": result.goals_ever_activated,
         "history": result.history,
     }, indent=2))
     print(f"  Saved → {path}")
@@ -123,7 +127,8 @@ def run_agent(
     provider: str = "openrouter",
     model: str = "meta-llama/llama-3.3-70b-instruct:free",
     vision: bool = False,
-    max_turns: int = MAX_TURNS,
+    turns_per_level: int = TURNS_PER_LEVEL,
+    max_levels: Optional[int] = None,
     verbose: bool = True,
 ) -> RunResult:
     """Run one episode with an LLM agent."""
@@ -147,10 +152,16 @@ def run_agent(
         result.errors.append("Failed to initialise game.")
         return result
 
+    levels_to_play = max_levels if max_levels is not None else int(frame_data.win_levels)
+    max_turns = levels_to_play * turns_per_level
+
     history: list[dict[str, Any]] = []
     action_history: list[str] = []   # running text log folded into each user_prompt
     prev_state: Optional[dict[str, Any]] = None
     last_action_name: str = ""
+    _activated_goal_ids: set[int] = set()  # tracks unique goals ever matched
+    _recent_actions: list[str] = []         # full action log for loop detection
+    _position_visits: dict[str, int] = {}  # position → visit count for revisit detection
 
     def log(event: dict[str, Any]) -> None:
         history.append({"timestamp": datetime.now(timezone.utc).isoformat(), **event})
@@ -163,6 +174,23 @@ def run_agent(
         result.turns = turn
         curr_state = get_structured_state(env, frame_data)
         use_vision = (world_level == "HARD" and vision and bool(frame_data.frame))
+
+        # ── Metrics: wall collision and glyph matching ────────────────────────
+        if prev_state is not None:
+            if prev_state["player"]["position"] == curr_state["player"]["position"]:
+                result.wall_collisions += 1
+
+        piece = curr_state["piece"]
+        for g in curr_state["goals"]:
+            if (
+                not g["completed"]
+                and g["id"] not in _activated_goal_ids
+                and piece["shape"] == g["required_shape"]
+                and piece["color"] == g["required_color"]
+                and piece["rotation_degrees"] == g["required_rotation_degrees"]
+            ):
+                _activated_goal_ids.add(g["id"])
+                result.goals_ever_activated = len(_activated_goal_ids)
 
         # Build current observation block
         if world_level == "EASY":
@@ -218,16 +246,55 @@ def run_agent(
         else:
             status_block = ""
 
-        user_prompt = f"{history_block}\n{status_block}\n{obs_block}\n\nYour next action:"
+        # ── Loop detection warnings ───────────────────────────────────────────
+        warnings: list[str] = []
 
-        # LLM call
+        # Warn if the same action dominates the last 10 moves
+        if len(_recent_actions) >= 10:
+            last_10 = _recent_actions[-10:]
+            most_common = max(set(last_10), key=last_10.count)
+            if last_10.count(most_common) >= 8:
+                warnings.append(
+                    f"WARNING: You have used {most_common} {last_10.count(most_common)} "
+                    f"of the last 10 turns. This is not working. "
+                    f"You MUST try a completely different direction to escape."
+                )
+
+        # Warn if current position has been visited many times
+        pos_key = str(curr_state["player"]["position"])
+        _position_visits[pos_key] = _position_visits.get(pos_key, 0) + 1
+        if _position_visits[pos_key] >= 5:
+            warnings.append(
+                f"WARNING: You have been at position {curr_state['player']['position']} "
+                f"{_position_visits[pos_key]} times. You are stuck in a loop. "
+                f"Try a completely different route."
+            )
+
+        warning_block = "\n".join(warnings) + "\n" if warnings else ""
+
+        user_prompt = (
+            f"{warning_block}{history_block}\n{status_block}\n{obs_block}"
+            '\n\nRespond with a single JSON object only: {"reasoning": "<your plan>", "action": "MOVE_NORTH"}'
+        )
+
+        # LLM call — retry once if the model forgets to include JSON
+        _RETRY_PROMPT = (
+            'You forgot to include a valid JSON object. Reply with ONLY the JSON, nothing else.\n'
+            'Example: {"reasoning": "I need to go west to reach the modifier", "action": "MOVE_WEST"}\n'
+            'Valid actions: MOVE_NORTH, MOVE_SOUTH, MOVE_EAST, MOVE_WEST'
+        )
         try:
             if use_vision:
                 b64 = frame_to_base64_png(frame_data.frame[-1])
                 reply = client.generate_with_image(system_prompt, user_prompt, b64)
             else:
                 reply = client.generate(system_prompt, user_prompt)
-            parsed = client.parse_json(reply)
+            try:
+                parsed = client.parse_json(reply)
+            except ValueError:
+                # Retry once with an explicit reminder
+                reply = client.generate(system_prompt, _RETRY_PROMPT)
+                parsed = client.parse_json(reply)
             action_name = str(parsed.get("action", "")).upper().strip()
             # Reasoning is either in the JSON (old format) or plain text before the JSON
             reasoning = str(parsed.get("reasoning", "")).strip()
@@ -238,7 +305,7 @@ def run_agent(
             err = f"Turn {turn}: LLM/parse error — {exc}"
             result.errors.append(err)
             log({"type": "error", "summary": err})
-            break
+            continue
 
         if action_name not in ACTION_MAP:
             err = f"Turn {turn}: unknown action '{action_name}'"
@@ -254,6 +321,7 @@ def run_agent(
 
         prev_state = curr_state
         last_action_name = action_name
+        _recent_actions.append(action_name)
 
         frame_data = env.step(ACTION_MAP[action_name])
         if frame_data is None:
@@ -268,6 +336,10 @@ def run_agent(
             break
         if frame_data.state.name == "GAME_OVER":
             log({"type": "game_over", "summary": f"GAME_OVER after {turn} turns."})
+            break
+        if max_levels is not None and frame_data.levels_completed >= max_levels:
+            result.won = True
+            log({"type": "win", "summary": f"Reached {max_levels} level(s) after {turn} turns."})
             break
     else:
         log({"type": "timeout", "summary": f"Turn budget ({max_turns}) exhausted."})
@@ -477,7 +549,10 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--feedback",  choices=["EASY", "HARD"], default="EASY")
     p.add_argument("--vision",    action="store_true",
                    help="Send rendered PNG images instead of ASCII for Hard World.")
-    p.add_argument("--turns",     type=int, default=MAX_TURNS)
+    p.add_argument("--turns-per-level", type=int, default=TURNS_PER_LEVEL,
+                   help="Turn budget per level (default: 100).")
+    p.add_argument("--max-levels", type=int, default=None,
+                   help="Stop after completing this many levels (default: play all levels).")
     p.add_argument("--human",     action="store_true",
                    help="Play yourself instead of running an LLM agent.")
     p.add_argument("--quiet",     action="store_true")
@@ -509,7 +584,8 @@ if __name__ == "__main__":
             provider=args.provider,
             model=args.model,
             vision=args.vision,
-            max_turns=args.turns,
+            turns_per_level=args.turns_per_level,
+            max_levels=args.max_levels,
             verbose=not args.quiet,
         )
         save_result(result)

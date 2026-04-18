@@ -74,6 +74,8 @@ def run_ablation(
         wins = 0
         total_turns = 0
         total_levels = 0
+        total_wall_collisions = 0
+        total_goals_activated = 0
         run_files: list[str] = []
 
         for trial in range(1, n_trials + 1):
@@ -85,6 +87,7 @@ def run_ablation(
                 feedback_level=cfg["feedback"],
                 provider=provider,
                 model=model,
+                max_levels=1,
                 verbose=verbose,
             )
             run_id = f"{timestamp}_{cfg_name}_t{trial}"
@@ -95,6 +98,8 @@ def run_ablation(
                 wins += 1
             total_turns += result.turns
             total_levels += result.levels_completed
+            total_wall_collisions += result.wall_collisions
+            total_goals_activated += result.goals_ever_activated
 
             status = "WIN " if result.won else "LOSS"
             print(f"  → {status} | turns: {result.turns} | "
@@ -103,23 +108,37 @@ def run_ablation(
         win_rate = wins / n_trials
         avg_turns = total_turns / n_trials
         avg_levels = total_levels / n_trials
+        avg_wall_collisions = total_wall_collisions / n_trials
+        avg_goals_activated = total_goals_activated / n_trials
 
         cfg_summary: dict[str, Any] = {
             "config_name": cfg_name,
             "config": cfg,
             "provider": provider,
-        "model": model,
+            "model": model,
             "n_trials": n_trials,
             "wins": wins,
             "win_rate": win_rate,
             "avg_turns": avg_turns,
             "avg_levels_completed": avg_levels,
+            "avg_wall_collisions": avg_wall_collisions,
+            "avg_goals_activated": avg_goals_activated,
             "run_files": run_files,
         }
         summary.append(cfg_summary)
 
         print(f"\n  ✓ {cfg_name}: win_rate={win_rate:.0%}  "
-              f"avg_turns={avg_turns:.1f}  avg_levels={avg_levels:.1f}")
+              f"avg_turns={avg_turns:.1f}  avg_levels={avg_levels:.1f}  "
+              f"wall_collisions={avg_wall_collisions:.1f}  goals_activated={avg_goals_activated:.1f}")
+
+    # ── Compute relative difficulty (only on winning runs) ────────────────────
+    baseline = next((s for s in summary if s["config_name"] == "baseline"), None)
+    baseline_turns = baseline["avg_turns"] if baseline else None
+    for s in summary:
+        if baseline_turns and baseline_turns > 0 and s["avg_turns"] > 0:
+            s["relative_difficulty"] = round(s["avg_turns"] / baseline_turns, 3)
+        else:
+            s["relative_difficulty"] = None
 
     # ── Save summary ──────────────────────────────────────────────────────────
     summary_path = RESULTS_DIR / f"ablation_summary_{timestamp}.json"
@@ -127,17 +146,21 @@ def run_ablation(
     print(f"\nFull summary saved → {summary_path}")
 
     # ── Print results table ───────────────────────────────────────────────────
-    print("\n" + "="*62)
-    print(f"{'Config':<20}  {'Win%':>5}  {'Avg turns':>9}  {'Avg levels':>10}")
-    print("-"*62)
+    print("\n" + "="*97)
+    print(f"{'Config':<20}  {'Win%':>5}  {'Avg turns':>9}  {'Avg levels':>10}  {'Wall hits':>9}  {'Goals act.':>10}  {'Rel. diff':>9}")
+    print("-"*97)
     for s in summary:
+        rel = f"{s['relative_difficulty']:.2f}x" if s["relative_difficulty"] is not None else "  n/a"
         print(
             f"{s['config_name']:<20}  "
             f"{s['win_rate']:>5.0%}  "
             f"{s['avg_turns']:>9.1f}  "
-            f"{s['avg_levels_completed']:>10.1f}"
+            f"{s['avg_levels_completed']:>10.1f}  "
+            f"{s['avg_wall_collisions']:>9.1f}  "
+            f"{s['avg_goals_activated']:>10.1f}  "
+            f"{rel:>9}"
         )
-    print("="*62)
+    print("="*97)
 
 
 # ── CLI entry point ───────────────────────────────────────────────────────────

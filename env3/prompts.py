@@ -38,7 +38,9 @@ Game mechanics:
 - Each move costs 1 stamina.
 - Stamina reaching 0 costs 1 life and resets your stamina to its maximum value.
 - Losing all lives results in GAME_OVER.
-- Walls block movement; attempting to enter a wall tile wastes the turn and your position will not change. If your position is the same after a move, you hit a wall — try a different direction.
+- Walls block movement. The state always includes "blocked_directions" — a list of directions \
+you CANNOT move from your current position. NEVER attempt a blocked direction; it wastes a \
+turn and stamina with no benefit.
 - Stepping on a shape modifier tile cycles your piece to the next shape (shapes 0–5, wraps \
 from 5 back to 0).
 - Stepping on a color modifier tile cycles your piece to the next color. Color order: \
@@ -50,9 +52,15 @@ required values.
 - Stepping onto an activated goal completes it.
 - Completing all goals in a level advances you to the next level.
 
+Navigation rules — follow these strictly:
+1. Check "blocked_directions" every turn before choosing a move. Never pick a blocked direction.
+2. If you are stuck (a direction you need is blocked), try a perpendicular direction to find a \
+path around the wall rather than retrying the same blocked direction.
+3. Plan your route before moving: figure out the sequence of moves needed, then execute it \
+step by step.
+
 Tile appearances in the grid (ASCII view):
-  Wall             — solid # characters filling the tile. Impassable — moving into one \
-wastes the turn and your position will not change.
+  Wall             — solid # characters filling the tile. Impassable.
   Floor            — . characters. Walkable.
   Shape changer    — white dots in a small diagonal cluster (#):
                      . # . .
@@ -80,8 +88,8 @@ Coordinate system: position is [x, y]. MOVE_NORTH decreases y. MOVE_SOUTH increa
 
 You have a limited turn budget. Plan your route before moving — wasted moves cost you the game.
 
-Each turn, first write 1-2 sentences of reasoning (plain text), then on a new line output your action as a JSON object:
-{"action": "MOVE_NORTH"}
+Each turn, respond with a single JSON object containing your reasoning and action:
+{"reasoning": "<1-2 sentences explaining your plan>", "action": "MOVE_NORTH"}
 Valid actions: MOVE_NORTH, MOVE_SOUTH, MOVE_EAST, MOVE_WEST\
 """
 
