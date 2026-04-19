@@ -156,7 +156,7 @@ class LithicArrayEnv:
 
     def _get_mechanics_instruction(self):
         if self.mechanics == MechanicsAxis.EASY:
-            return """You may query arrangements via Strata (submit arrangement + predicted classification). Matches earn 1 token. You can spend tokens to propose a rule. The Basalt provides counter-examples on failed proposals.
+            return """You have two actions available. STRATA submits an arrangement together with your predicted classification. Matching the Basalt's classification earns 1 token. PROPOSE costs 1 token. If a PROPOSE attempt is rejected, the Basalt provides a counter-example.
 
 You must respond with only a JSON block containing your action. Do not include markdown or other text outside the JSON.
 Strata Action Schema:

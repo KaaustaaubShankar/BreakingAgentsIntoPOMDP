@@ -87,11 +87,18 @@ class LithicArrayEnvTests(unittest.TestCase):
 
         self.assertIn("discover the hidden rule", easy_env._get_goal_instruction())
         self.assertEqual(hard_env._get_goal_instruction(), "")
-        self.assertIn("You may query arrangements via Strata", easy_env._get_mechanics_instruction())
+        self.assertIn("You have two actions available.", easy_env._get_mechanics_instruction())
         self.assertEqual(
             hard_env._get_mechanics_instruction(),
             "Respond with a JSON object containing your action ('STRATA' or 'PROPOSE').",
         )
+
+    def test_mechanics_prompt_does_not_repeat_goal_language(self):
+        mechanics_prompt = LithicArrayEnv(mechanics=MechanicsAxis.EASY)._get_mechanics_instruction().lower()
+
+        self.assertNotIn("discover the hidden rule", mechanics_prompt)
+        self.assertNotIn("state the rule explicitly to win", mechanics_prompt)
+        self.assertIn("propose costs 1 token", mechanics_prompt)
 
     def test_feedback_easy_returns_counterexample_on_failed_proposal(self):
         env = LithicArrayEnv(feedback=FeedbackAxis.EASY)
