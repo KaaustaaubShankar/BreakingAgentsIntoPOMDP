@@ -25,11 +25,7 @@ You are shown {n_examples} labeled example sequences to help you learn the rule:
 Use these examples to form an initial hypothesis about the hidden rule."""
 
 WORLD_HARD = """\
-You are shown 1 labeled example sequence:
-
-{examples}
-
-You must discover the rule from this limited starting point."""
+You receive no examples. You must begin classifying immediately."""
 
 
 # ---------------------------------------------------------------------------
@@ -42,7 +38,7 @@ classified as "R" or "L". Once you understand the rule, you can classify new \
 sequences correctly. You succeed when you correctly classify a sequence."""
 
 GOAL_HARD = """\
-Classify each sequence as "R" or "L"."""
+Return the correct output for each input."""
 
 
 # ---------------------------------------------------------------------------
@@ -61,7 +57,6 @@ QUERY: Request one additional labeled example to refine your hypothesis.
   Each QUERY costs 1 token from your budget. Use it when you need more data."""
 
 MECHANICS_HARD = """\
-Available actions: CLASSIFY, QUERY.
 Format your response as JSON."""
 
 
@@ -76,7 +71,7 @@ After each CLASSIFY attempt:
 Use this feedback to refine your understanding of the rule."""
 
 FEEDBACK_HARD = """\
-After each CLASSIFY attempt, you will be told whether you were correct or incorrect."""
+You will not receive feedback on your classifications."""
 
 
 # ---------------------------------------------------------------------------
@@ -96,10 +91,8 @@ def build_system_prompt(
     if world == AxisLevel.EASY:
         world_block = WORLD_EASY.format(n_examples=n_easy_examples, examples=example_str)
     else:
-        # HARD: only show 1 example
-        first = examples[:1]
-        one_ex = "\n".join(f"  {seq} -> {label}" for seq, label in first)
-        world_block = WORLD_HARD.format(examples=one_ex)
+        # HARD: zero examples, cold start
+        world_block = WORLD_HARD
 
     goal_block = GOAL_EASY if goal == AxisLevel.EASY else GOAL_HARD
     mechanics_block = MECHANICS_EASY if mechanics == AxisLevel.EASY else MECHANICS_HARD
@@ -112,13 +105,13 @@ def format_classify_result(result: dict, feedback_level: AxisLevel) -> str:
     seq = result["sequence"]
     label = result["true_label"]
     correct = result["correct"]
+    turn = result.get("turn", "?")
+    if feedback_level == AxisLevel.HARD:
+        return f'Turn {turn} complete.'
     if correct:
         return f'Correct. The label for {seq} is {label}.'
     else:
-        if feedback_level == AxisLevel.EASY:
-            return f'Incorrect. The correct label for {seq} was {label}.'
-        else:
-            return 'Incorrect.'
+        return f'Incorrect. The correct label for {seq} was {label}.'
 
 
 def format_query_result(seq: str, label: str) -> str:

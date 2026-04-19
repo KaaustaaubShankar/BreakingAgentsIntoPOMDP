@@ -91,7 +91,16 @@ def parse_action(text: str) -> Optional[Dict]:
     json_match = re.search(r'\{[^{}]*\}', text, re.DOTALL)
     if json_match:
         try:
-            return json.loads(json_match.group())
+            parsed = json.loads(json_match.group())
+            # Normalize: if the agent used a non-standard key but provided an R/L value,
+            # treat it as a classify action (needed when mechanics_HARD hides the format)
+            if "action" not in parsed:
+                for val in parsed.values():
+                    if str(val).upper() in ("R", "L"):
+                        label = str(val).upper()
+                        seq = parsed.get("sequence", None)
+                        return {"action": "classify", "sequence": seq, "label": label}
+            return parsed
         except json.JSONDecodeError:
             pass
     # Try to find classify/query keywords
@@ -149,8 +158,9 @@ def run_chirality_llm_agent(
     env = ChiralityEnv(rule_index=rule_index, seed=seed)
     client = LLMClient(provider=provider, model=model)
 
-    # Generate initial examples
-    examples = env.get_initial_examples(n_easy_examples if world == AxisLevel.EASY else 1)
+    # Generate initial examples (HARD = zero examples, cold start)
+    n_examples = n_easy_examples if world == AxisLevel.EASY else 0
+    examples = env.get_initial_examples(n_examples) if n_examples > 0 else []
 
     system_prompt = build_system_prompt(
         world=world,
@@ -202,15 +212,22 @@ def run_chirality_llm_agent(
         messages.append({"role": "assistant", "content": response_text})
 
         if action is None:
-            feedback_msg = "Invalid response. Please respond with JSON: {\"action\": \"classify\", \"sequence\": \"...\", \"label\": \"R\" or \"L\"} or {\"action\": \"query\"}"
+            if mechanics == AxisLevel.HARD:
+                feedback_msg = "Invalid response. Please respond with valid JSON."
+            else:
+                feedback_msg = "Invalid response. Please respond with JSON: {\"action\": \"classify\", \"sequence\": \"...\", \"label\": \"R\" or \"L\"} or {\"action\": \"query\"}"
             history.errors.append(f"Turn {turn}: parse failure")
         elif action.get("action") == "query":
-            history.total_queries += 1
-            seq, label = env.query()
-            feedback_msg = format_query_result(seq, label)
-            feedback_msg += f"\n\nNow classify: {current_sequence}"
+            if mechanics == AxisLevel.HARD:
+                feedback_msg = f"Unknown action. Classify this sequence: {current_sequence}"
+                history.errors.append(f"Turn {turn}: query blocked (mechanics_HARD)")
+            else:
+                history.total_queries += 1
+                seq, label = env.query()
+                feedback_msg = format_query_result(seq, label)
+                feedback_msg += f"\n\nNow classify: {current_sequence}"
         elif action.get("action") == "classify":
-            seq = action.get("sequence", current_sequence)
+            seq = action.get("sequence") or current_sequence
             pred_label = action.get("label", "").upper()
             if pred_label not in ("R", "L"):
                 feedback_msg = "Invalid label. Must be 'R' or 'L'."
@@ -237,7 +254,10 @@ def run_chirality_llm_agent(
                     current_sequence = "".join(rng.choices(SYMBOLS, k=5))
                     feedback_msg += f"\n\nNext sequence to classify: {current_sequence}"
         else:
-            feedback_msg = "Unknown action. Use 'classify' or 'query'."
+            if mechanics == AxisLevel.HARD:
+                feedback_msg = "Invalid response. Please respond with valid JSON."
+            else:
+                feedback_msg = "Unknown action. Use 'classify' or 'query'."
 
         messages.append({"role": "user", "content": feedback_msg})
 
