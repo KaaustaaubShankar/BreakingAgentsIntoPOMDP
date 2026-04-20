@@ -2,7 +2,7 @@
 from .engine import Obj, KA59State, STEP, TAG_WALL_TRANSFER, TAG_WALL_SOLID, TAG_SELECTED, TAG_BLOCK
 from .env    import KA59BlindEnv, ObjectView, StepResult, Action, SELECT, MOVE_UP, MOVE_DOWN, MOVE_LEFT, MOVE_RIGHT
 from .runner    import run_episode, EpisodeTrace, EpisodeStep, InvalidActionError
-from .discovery  import MinimalHypothesisAgent
+from .discovery  import MinimalHypothesisAgent, NaiveRightAgent, RotateOnBlockAgent
 from .scenarios  import SCENARIOS
 from .benchmark  import evaluate_agent, BenchmarkResult, ScenarioResult
 
@@ -22,8 +22,10 @@ __all__ = [
     "EpisodeTrace",
     "EpisodeStep",
     "InvalidActionError",
-    # Discovery agent
+    # Agents
     "MinimalHypothesisAgent",
+    "NaiveRightAgent",
+    "RotateOnBlockAgent",
     # Scenarios + benchmark
     "SCENARIOS",
     "evaluate_agent",

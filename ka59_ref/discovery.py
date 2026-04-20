@@ -229,3 +229,94 @@ class MinimalHypothesisAgent:
         """
         best = min(_PREF, key=self._score)
         return _DIR_TO_ACTION[best]
+
+
+# ---------------------------------------------------------------------------
+# NaiveRightAgent
+# ---------------------------------------------------------------------------
+
+class NaiveRightAgent:
+    """
+    Always returns MOVE_RIGHT.  No state, no learning.
+
+    Usefulness as a baseline
+    ------------------------
+    Establishes the floor for agents that never adapt.  In scenarios where
+    right is permanently blocked after the first step, moved_count = 1 (or 0
+    for solid walls) regardless of episode length.  Any agent that learns
+    should outperform this on most scenarios except open_move_right where
+    all agents are equivalent.
+    """
+
+    def reset(self) -> None:
+        """No-op; NaiveRightAgent has no state to clear."""
+
+    def act(self, obs: List[ObjectView]) -> Action:
+        """Always return MOVE_RIGHT, ignoring obs entirely."""
+        return MOVE_RIGHT
+
+
+# ---------------------------------------------------------------------------
+# RotateOnBlockAgent
+# ---------------------------------------------------------------------------
+
+class RotateOnBlockAgent:
+    """
+    Simple rotation fallback: stay on the current direction until blocked,
+    then advance to the next direction in the cycle (right → down → left → up).
+
+    Usefulness as a baseline
+    ------------------------
+    Performs better than NaiveRightAgent in obstructed scenarios because it
+    eventually escapes blocked directions.  Unlike MinimalHypothesisAgent it
+    does NOT track push success, so it cannot distinguish WALL_TRANSFER from
+    WALL_SOLID and cannot preferentially revisit directions where pushing
+    worked.  passable_walls is not tracked (always 0).
+
+    State
+    -----
+    current_dir_idx : index into _PREF pointing at the current direction
+    step_count      : total act() calls since last reset
+    last_obs        : previous observation snapshot (for transition analysis)
+    last_action     : previous action taken
+    """
+
+    def __init__(self) -> None:
+        self.reset()
+
+    def reset(self) -> None:
+        self.step_count:   int                        = 0
+        self.current_dir_idx: int                     = 0
+        self.last_obs:     Optional[List[ObjectView]] = None
+        self.last_action:  Optional[Action]           = None
+
+    def act(self, obs: List[ObjectView]) -> Action:
+        """
+        Observe the transition from the previous step, rotate if blocked,
+        then return the current direction.
+        """
+        if self.last_action is not None and self.last_obs is not None:
+            self._maybe_rotate(self.last_obs, self.last_action, obs)
+
+        action = _DIR_TO_ACTION[_PREF[self.current_dir_idx]]
+        self.last_obs    = list(obs)
+        self.last_action = action
+        self.step_count += 1
+        return action
+
+    def _maybe_rotate(
+        self,
+        prev:   List[ObjectView],
+        action: Action,
+        curr:   List[ObjectView],
+    ) -> None:
+        """Rotate to the next direction if the selected piece did not move."""
+        if action.type not in _DIR_TO_ACTION:
+            return
+        sel_prev = _selected(prev)
+        sel_curr = _selected(curr)
+        if sel_prev is None or sel_curr is None:
+            return
+        if sel_prev.x == sel_curr.x and sel_prev.y == sel_curr.y:
+            # Blocked: advance to next direction in cycle
+            self.current_dir_idx = (self.current_dir_idx + 1) % len(_PREF)
