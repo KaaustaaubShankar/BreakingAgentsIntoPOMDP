@@ -1,9 +1,9 @@
-# KA59 Reference Simulator & Blinded Environment
+# KA59 Faithful Simulator & Blinded Environment
 
 Faithful, readable reimplementation of the core movement mechanics from
 `ka59.py` (ARC Prize 2026 game source, MIT licence).
 
-This is a **reference clone for analysis** — not a solver or benchmark agent.
+This is a **faithful simulator for analysis** — not a solver or benchmark agent.
 
 ## Critical Asymmetry
 
@@ -37,7 +37,7 @@ directly**. The mechanism is sometimes called a "transfer gate" or
 
 ```
 ka59_ref/
-  engine.py   — reference simulator (rule-aware, uses internal tag names)
+  engine.py   — faithful simulator (rule-aware, uses internal tag names)
   env.py      — blinded agent-facing environment (hides rules / tag names)
   README.md   — this file
 ```
@@ -78,7 +78,7 @@ result = env.step(SELECT("b"))   # → StepResult
 ## Running the tests
 
 ```bash
-# Engine (reference) tests only:
+# Engine (faithful simulator) tests only:
 python3 -m pytest tests/test_ka59_ref.py -v
 
 # Env (blinded agent) tests only:

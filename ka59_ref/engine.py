@@ -1,6 +1,6 @@
 """
-KA59 Reference Simulator — Core Engine
-=======================================
+KA59 Faithful Simulator — Core Engine
+=====================================
 Faithful, readable reimplementation of the movement semantics from ka59.py
 (ARC Prize 2026 game source).
 
