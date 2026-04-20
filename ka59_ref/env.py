@@ -152,9 +152,10 @@ class KA59BlindEnv:
     """
 
     def __init__(self) -> None:
-        self._state: Optional[KA59State] = None
-        self._id_map: Dict[str, Obj] = {}   # id string → Obj
-        self._obj_ids: Dict[int, str] = {}   # id(Obj) → id string  (by Python identity)
+        self._state:             Optional[KA59State] = None
+        self._id_map:            Dict[str, Obj]       = {}  # id string → Obj
+        self._obj_ids:           Dict[int, str]       = {}  # id(Obj) → id string
+        self._observe_positions: bool                 = True  # World-probe flag
 
     # -- reset ---------------------------------------------------------------
 
@@ -192,11 +193,14 @@ class KA59BlindEnv:
 
         self._id_map  = id_map
         self._obj_ids = {id(obj): obj_id for obj_id, obj in id_map.items()}
-        self._state   = KA59State(
+        self._state            = KA59State(
             objects  = objects,
             selected = first_selected,
             steps    = level_spec.get("steps", 0),
         )
+        # World-probe flag: when False, non-selected objects appear at (0,0,0,0)
+        # so the agent cannot use position to reason about their locations.
+        self._observe_positions: bool = level_spec.get("observe_positions", True)
 
         return self._observe()
 
@@ -254,14 +258,22 @@ class KA59BlindEnv:
         state = self._state
         views = []
         for obj_id, obj in self._id_map.items():
+            is_selected = (obj is state.selected)
+            # World-probe: hide position of non-selected objects when
+            # observe_positions=False. The selected piece always gets real
+            # coordinates so the agent can still track its own movement.
+            if self._observe_positions or is_selected:
+                x, y, w, h = obj.x, obj.y, obj.w, obj.h
+            else:
+                x, y, w, h = 0, 0, 0, 0
             views.append(ObjectView(
                 id          = obj_id,
-                x           = obj.x,
-                y           = obj.y,
-                w           = obj.w,
-                h           = obj.h,
+                x           = x,
+                y           = y,
+                w           = w,
+                h           = h,
                 kind        = _obs_kind(obj),
-                is_selected = (obj is state.selected),
+                is_selected = is_selected,
             ))
         views.sort(key=lambda v: v.id)
         return views
