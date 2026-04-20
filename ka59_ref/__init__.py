@@ -3,8 +3,8 @@ from .engine import Obj, KA59State, STEP, TAG_WALL_TRANSFER, TAG_WALL_SOLID, TAG
 from .env    import KA59BlindEnv, ObjectView, StepResult, Action, SELECT, MOVE_UP, MOVE_DOWN, MOVE_LEFT, MOVE_RIGHT
 from .runner    import run_episode, EpisodeTrace, EpisodeStep, InvalidActionError
 from .discovery  import MinimalHypothesisAgent, NaiveRightAgent, RotateOnBlockAgent
-from .scenarios  import SCENARIOS
-from .benchmark  import evaluate_agent, BenchmarkResult, ScenarioResult
+from .scenarios  import SCENARIOS, SCENARIO_META, ScenarioMeta
+from .benchmark  import evaluate_agent, BenchmarkResult, ScenarioResult, EpistemicSummary
 
 __all__ = [
     # Engine (reference / rule-aware)
@@ -28,9 +28,12 @@ __all__ = [
     "RotateOnBlockAgent",
     # Scenarios + benchmark
     "SCENARIOS",
+    "SCENARIO_META",
+    "ScenarioMeta",
     "evaluate_agent",
     "BenchmarkResult",
     "ScenarioResult",
+    "EpistemicSummary",
     "ObjectView",
     "StepResult",
     "Action",

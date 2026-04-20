@@ -29,11 +29,43 @@ Design notes
 """
 
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .runner import run_episode, EpisodeTrace
 from .env    import ObjectView
+
+
+# ---------------------------------------------------------------------------
+# EpistemicSummary: agent belief state at episode end (engine-internal-free)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class EpistemicSummary:
+    """
+    Minimal summary of an agent's hypothesis/belief state at the end of an
+    episode.  Extracted from the agent object after run_episode completes.
+
+    For agents that expose readable hypothesis state (e.g. MinimalHypothesisAgent):
+        has_beliefs=True; blocked_dirs and push_success_dirs are populated.
+
+    For agents without such state (NaiveRightAgent, RotateOnBlockAgent, lambdas):
+        has_beliefs=False; all dicts are empty.
+
+    No engine-internal tag strings appear in any field.  Direction keys are
+    always from {"right", "left", "up", "down"}.
+
+    Fields
+    ------
+    has_beliefs          : True iff agent exposed structured hypothesis state
+    blocked_dirs         : direction → count of times that direction was blocked
+    push_success_dirs    : direction → count of push-assisted move successes
+    passable_walls_found : distinct wall IDs observed to be passable by pushed blocks
+    """
+    has_beliefs:          bool
+    blocked_dirs:         Dict[str, int]
+    push_success_dirs:    Dict[str, int]
+    passable_walls_found: int
 
 
 # ---------------------------------------------------------------------------
@@ -67,7 +99,7 @@ class ScenarioResult:
     passable_walls_found: int
 
 
-@dataclass(frozen=True)
+@dataclass
 class BenchmarkResult:
     """
     Aggregated results for one agent evaluated across multiple scenarios.
@@ -76,9 +108,13 @@ class BenchmarkResult:
     ------
     agent_name : class name of the agent (or "unknown")
     results    : tuple of ScenarioResult, one per scenario, in input order
+    epistemic  : dict mapping scenario_name → EpistemicSummary
+                 Contains the agent's belief/hypothesis state at episode end
+                 for each scenario.  Engine-internal-free.
     """
     agent_name: str
     results:    Tuple[ScenarioResult, ...]
+    epistemic:  Dict[str, EpistemicSummary] = field(default_factory=dict)
 
     def by_name(self, name: str) -> ScenarioResult:
         """Return the ScenarioResult for the given scenario name."""
@@ -86,6 +122,12 @@ class BenchmarkResult:
             if r.scenario_name == name:
                 return r
         raise KeyError(f"No result for scenario {name!r}")
+
+    def epistemic_for(self, name: str) -> EpistemicSummary:
+        """Return the EpistemicSummary for the given scenario name."""
+        if name not in self.epistemic:
+            raise KeyError(f"No epistemic summary for scenario {name!r}")
+        return self.epistemic[name]
 
 
 # ---------------------------------------------------------------------------
@@ -112,8 +154,9 @@ def evaluate_agent(
     -------
     BenchmarkResult with one ScenarioResult per scenario.
     """
-    scenario_results: List[ScenarioResult] = []
-    inferred_name: Optional[str] = None
+    scenario_results:  List[ScenarioResult]          = []
+    epistemic_map:     Dict[str, EpistemicSummary]   = {}
+    inferred_name:     Optional[str]                 = None
 
     for scenario_name, level_spec in scenarios.items():
         agent = agent_factory()
@@ -124,10 +167,12 @@ def evaluate_agent(
 
         trace = run_episode(level_spec, agent.act, max_steps=max_steps)
         scenario_results.append(_make_result(scenario_name, trace, agent))
+        epistemic_map[scenario_name] = _extract_epistemic(agent)
 
     return BenchmarkResult(
         agent_name = inferred_name or "unknown",
         results    = tuple(scenario_results),
+        epistemic  = epistemic_map,
     )
 
 
@@ -144,6 +189,34 @@ def _final_selected_pos(trace: EpisodeTrace) -> Tuple[int, int]:
             return (view.x, view.y)
     # Fallback: selected piece not found (should not happen in valid levels)
     return (0, 0)
+
+
+def _extract_epistemic(agent: Any) -> EpistemicSummary:
+    """
+    Extract a minimal epistemic summary from the agent after a run.
+
+    Agents that expose hypothesis state (blocked_count, push_success,
+    passable_walls attributes) get has_beliefs=True with populated dicts.
+    All other agents get has_beliefs=False with empty dicts.
+    Engine-internal tag strings never appear in the output.
+    """
+    has_beliefs = (
+        hasattr(agent, "blocked_count")
+        and hasattr(agent, "push_success")
+    )
+    if has_beliefs:
+        return EpistemicSummary(
+            has_beliefs          = True,
+            blocked_dirs         = dict(getattr(agent, "blocked_count", {})),
+            push_success_dirs    = dict(getattr(agent, "push_success", {})),
+            passable_walls_found = len(getattr(agent, "passable_walls", set())),
+        )
+    return EpistemicSummary(
+        has_beliefs          = False,
+        blocked_dirs         = {},
+        push_success_dirs    = {},
+        passable_walls_found = len(getattr(agent, "passable_walls", set())),
+    )
 
 
 def _make_result(

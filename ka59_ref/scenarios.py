@@ -1,50 +1,64 @@
 """
-KA59 Canonical Scenario Corpus
-================================
-A small set of named level specs that cover the mechanistically important
-situations in KA59.  These are the "paper-useful" reference scenarios —
-interpretable enough to reason about, minimal enough to inspect by hand.
+KA59 Canonical Scenario Corpus + Paper-Facing Metadata
+========================================================
+Two dictionaries exported from this module:
 
-Each entry is a plain dict that KA59BlindEnv.reset() accepts directly.
-All object IDs are short human-readable strings, never internal tag constants.
+  SCENARIOS      — level specs consumed by KA59BlindEnv.reset()
+  SCENARIO_META  — paper-facing metadata keyed by the same names
+
+The metadata maps each scenario to the JKJ paper's four-axis knockout
+framing (World / Goal / Mechanics / Feedback), following the design in
+MONDAY_EXPERIMENT_MATRIX.md and PROJECT_ARCHAEOLOGY.md:
+
+  primary_axis — which capability axis this scenario primarily stresses
+  tags         — tuple of short paper-legible labels for the scenario
+  rationale    — one-sentence justification for the paper
+
+All names and tags are human-readable.  No internal engine tag constants
+(0015qniapgwsvb etc.) appear anywhere in this module.
 
 Scenario inventory
 ------------------
-open_move_right
-    No obstacles.  One selected piece, nothing else.
-    Expected behaviour: agent moves freely in any direction.
-    Establishes performance ceiling for unobstructed movement.
-
-transfer_wall_direct_block
-    Selected piece is directly adjacent to a WALL_TRANSFER tile.
-    No pushable block sits between them.
-    Expected behaviour: direct move right is blocked immediately;
-    agent must rotate to another direction.
-    Probes: can agent recover from a wall it cannot cross directly?
-
-transfer_wall_push
-    sel → block → WALL_TRANSFER → open space.
-    Expected behaviour: first move right succeeds (block is pushed through
-    the transfer wall); agent records passable_walls discovery.
-    Probes: the core wall-transfer asymmetry via a push scenario.
-
-solid_wall_push_blocked
-    sel → block → WALL_SOLID → (no space).
-    Expected behaviour: first move right is blocked (block cannot pass
-    solid wall); agent records a block in direction 'right'.
-    Probes: the same visual layout as transfer_wall_push but with
-    fundamentally different mechanics — indistinguishable from observation.
-
-push_chain
-    sel → block_a → block_b → open space (no walls).
-    Expected behaviour: first move right propagates through the two-block
-    chain; both blocks advance; selected piece advances.
-    Probes: recursive push propagation.
+open_move_right         baseline — no hidden rules, ceiling for free movement
+transfer_wall_direct_block  Mechanics — transfer wall blocks direct move
+transfer_wall_push          Mechanics — core asymmetry: push passes through
+solid_wall_push_blocked     Mechanics — contrast: visually identical, fully blocking
+push_chain                  Mechanics — recursive chain-push dynamics
 """
 
 from __future__ import annotations
+from dataclasses import dataclass
+from typing import Tuple
 
 STEP: int = 3   # mirror engine.STEP; kept local so this file is self-contained
+
+
+# ---------------------------------------------------------------------------
+# ScenarioMeta: paper-facing taxonomy
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class ScenarioMeta:
+    """
+    Paper-facing metadata for one KA59 scenario.
+
+    Fields
+    ------
+    primary_axis : str
+        Which of the four capability axes this scenario primarily stresses.
+        One of: "baseline" | "World" | "Goal" | "Mechanics" | "Feedback"
+        Mirrors the JKJ proposal / MONDAY_EXPERIMENT_MATRIX framing.
+
+    tags : tuple[str, ...]
+        Short paper-legible labels describing the scenario's key properties.
+        No engine-internal constants; human-readable only.
+
+    rationale : str
+        One-sentence justification for including this scenario.
+    """
+    primary_axis: str
+    tags:         Tuple[str, ...]
+    rationale:    str
 
 
 SCENARIOS: dict[str, dict] = {
@@ -104,4 +118,64 @@ SCENARIOS: dict[str, dict] = {
             {"id": "pb",  "x": STEP * 2,   "y": 0, "w": STEP, "h": STEP, "kind": "block"},
         ],
     },
+}
+
+
+# ---------------------------------------------------------------------------
+# SCENARIO_META: paper-facing metadata for each canonical scenario
+# ---------------------------------------------------------------------------
+
+SCENARIO_META: dict[str, ScenarioMeta] = {
+
+    "open_move_right": ScenarioMeta(
+        primary_axis = "baseline",
+        tags         = ("no_obstacles", "ceiling", "free_movement"),
+        rationale    = (
+            "Control condition with no hidden rules or obstacles; establishes "
+            "the performance ceiling against which all other scenarios are compared."
+        ),
+    ),
+
+    "transfer_wall_direct_block": ScenarioMeta(
+        primary_axis = "Mechanics",
+        tags         = ("hidden_transition", "direct_block", "wall_probe",
+                        "no_push_candidate"),
+        rationale    = (
+            "Mechanics probe: the transfer wall blocks direct movement; agent "
+            "must discover via interaction that this boundary cannot be crossed "
+            "directly and must find an alternate path."
+        ),
+    ),
+
+    "transfer_wall_push": ScenarioMeta(
+        primary_axis = "Mechanics",
+        tags         = ("hidden_transition", "asymmetric_push", "wall_probe",
+                        "wall_transfer", "contrastive_pair"),
+        rationale    = (
+            "Core Mechanics probe: the wall-transfer asymmetry — a boundary that "
+            "blocks direct movement but allows pushed blocks to pass through — is "
+            "only discoverable through interaction, not from observation alone."
+        ),
+    ),
+
+    "solid_wall_push_blocked": ScenarioMeta(
+        primary_axis = "Mechanics",
+        tags         = ("hidden_transition", "wall_solid", "wall_probe",
+                        "fully_blocking", "contrastive_pair"),
+        rationale    = (
+            "Mechanics contrast condition: visually identical layout to "
+            "transfer_wall_push but mechanically fully blocking; paired to "
+            "isolate the Mechanics axis in the knockout-matrix design."
+        ),
+    ),
+
+    "push_chain": ScenarioMeta(
+        primary_axis = "Mechanics",
+        tags         = ("chain_dynamics", "recursive_push", "multi_block"),
+        rationale    = (
+            "Mechanics probe for recursive push propagation: tests whether "
+            "the agent can leverage a two-block chain as an instrument for "
+            "advancement when the direct path is long."
+        ),
+    ),
 }
