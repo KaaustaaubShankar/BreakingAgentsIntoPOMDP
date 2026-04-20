@@ -1,4 +1,4 @@
-# KA59 Reference Simulator
+# KA59 Reference Simulator & Blinded Environment
 
 Faithful, readable reimplementation of the core movement mechanics from
 `ka59.py` (ARC Prize 2026 game source, MIT licence).
@@ -33,14 +33,63 @@ directly**. The mechanism is sometimes called a "transfer gate" or
 | `zsqdfmgyjo`    | `3`   | `STEP` — pixels per action |
 | `zuhizjvlpo`    | `5`   | `MAX_PUSH_TRACK_STEPS` |
 
+## Module layout
+
+```
+ka59_ref/
+  engine.py   — reference simulator (rule-aware, uses internal tag names)
+  env.py      — blinded agent-facing environment (hides rules / tag names)
+  README.md   — this file
+```
+
+### `engine.py` — KA59State
+Faithful reimplementation of the source mechanics. Knows about wall tags,
+push asymmetry, etc. Used directly only for analysis and test scaffolding.
+
+### `env.py` — KA59BlindEnv
+Agent-facing wrapper. The agent interacts via:
+
+```python
+from ka59_ref.env import KA59BlindEnv, MOVE_RIGHT, MOVE_LEFT, SELECT
+
+env = KA59BlindEnv()
+obs = env.reset(level_spec)      # → list[ObjectView]
+result = env.step(MOVE_RIGHT)    # → StepResult
+result = env.step(SELECT("b"))   # → StepResult
+```
+
+**ObjectView fields:** `id`, `x`, `y`, `w`, `h`, `kind`, `is_selected`  
+**kind values:** `"wall"` | `"block"` | `"controllable"` — both wall types map to `"wall"`  
+**StepResult fields:** `obs`, `moved`, `steps_remaining`, `done`
+
+**Level spec format** (used by `reset()` to configure the engine — NOT exposed to agent):
+```python
+{
+    "steps": 10,
+    "objects": [
+        {"id": "sel", "x": 0,  "y": 0, "w": 3, "h": 3, "kind": "selected"},
+        {"id": "pb",  "x": 3,  "y": 0, "w": 3, "h": 3, "kind": "block"},
+        {"id": "wt",  "x": 6,  "y": 0, "w": 3, "h": 3, "kind": "wall_transfer"},
+        {"id": "ws",  "x": 9,  "y": 0, "w": 3, "h": 3, "kind": "wall_solid"},
+    ]
+}
+```
+
 ## Running the tests
 
 ```bash
+# Engine (reference) tests only:
 python3 -m pytest tests/test_ka59_ref.py -v
+
+# Env (blinded agent) tests only:
+python3 -m pytest tests/test_ka59_env.py -v
+
+# Both together (56 total):
+python3 -m pytest tests/test_ka59_ref.py tests/test_ka59_env.py -v
 ```
 
-All 23 tests should pass, including the focused asymmetry tests in
-`TestPushWallAsymmetry`.
+All 56 tests pass, including the critical no-leakage and transition-asymmetry
+suites in `TestNoTagLeakage` and `TestAsymmetryViaTransitions`.
 
 ## Known limitations / ambiguities
 
