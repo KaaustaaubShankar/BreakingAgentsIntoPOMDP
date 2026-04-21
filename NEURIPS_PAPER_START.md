@@ -1,187 +1,243 @@
-# NeurIPS paper start for JKJ benchmark work
+# NeurIPS paper start for JKJ / BreakingAgentsIntoPOMDP
 
-## Short answer
+## What the project actually is right now
 
-Yes, the template you downloaded is fine.
+This project is no longer best described as just "a few game benchmarks" or just the older Zendo implementation.
 
-The bottleneck is **not** the LaTeX structure, it is the **paper claim** and how the current environments fit that claim.
+The real project direction is:
 
-Use the NeurIPS template as-is, and build the paper around this framing.
+- evaluate whether agents can **discover hidden rules / latent mechanics through interaction**
+- do that under **partial specification / partial observability**
+- factor difficulty along the four benchmark axes from the proposal and Monday meeting:
+  - **World**
+  - **Goal**
+  - **Mechanics**
+  - **Feedback**
+- measure not only final outcome, but also the agent's **epistemic trajectory** while it is discovering the environment
 
-## Current strongest paper framing
+That is the actual scientific core.
 
-**Working claim:**
+## Important project history to preserve accurately
 
-Current agent evaluations under-measure whether agents can **discover hidden mechanics through interaction under partial observability**. A factorized benchmark over **World / Goal / Mechanics / Feedback**, plus **epistemic traces**, exposes failures that final score alone hides.
+There are really **two layers of history** here:
 
-That is stronger than:
-- "we made a few game benchmarks"
-- "we tested agents on ARC-like environments"
+### 1. Earlier repo state
+The repo already had earlier Zendo work, including a difficulty-ladder style experiment setup.
+That work is useful, but it is **not identical** to the newer framing.
 
-## What the current environments contribute
+### 2. Current project trajectory
+The newer framing, reflected in the Monday matrix notes and JKJ archaeology, is moving toward:
+- a **knockout-style benchmark framing** rather than just a difficulty ladder
+- multiple environments rather than one game only
+- a benchmark question about **hidden-mechanic discovery**, not just success rate
+- a paper contribution that includes **belief tracking / epistemic traces**, not only final win/loss
 
-- **KA59**: smallest clean mechanics-discovery case
-- **BP35**: harder planning / interaction case with clicks, gravity, and forward consequences
-- **LS20**: another environment in the broader benchmark set
+So the paper should present the project as an evolution:
+- from single-environment / difficulty-style experiments
+- toward a broader benchmark for discovery under partial observability
 
-The paper should not pretend all environments do the same thing. They support the same thesis from different angles.
+That is much more accurate than pretending the project started in its final form.
 
-## Suggested title directions
+## Where each environment fits today
 
-### More benchmark-forward
-- **Breaking Agents into POMDPs: Evaluating Hidden-Mechanic Discovery Under Partial Observability**
-- **Beyond Final Score: Measuring Hidden-Rule Discovery in Agent Benchmarks**
-- **Evaluating Mechanistic Discovery in Interactive Agent Benchmarks**
+### Zendo
+- important earlier implementation work
+- already had axis-style experimentation and ablation ideas
+- useful for historical continuity and prior benchmark framing
+- but should not be presented as the only or final environment
 
-### More measurement-forward
-- **Epistemic Traces for Evaluating Hidden-Mechanic Discovery in Interactive Environments**
-- **What Win Rate Misses: Measuring Latent Rule Discovery in Agent Benchmarks**
+### BP35 / `env4`
+- currently the more game-facing, interaction-heavy environment
+- click-based, gravity-based, forward-planning-heavy
+- good for showing that discovery is not just symbolic rule induction, but also interactive control with hidden consequences
+- currently implementation-heavy and still being debugged
 
-## Strongest current abstract shape
+### LS20
+- another environment in the broader benchmark set
+- helps prevent the story from collapsing into one bespoke game
+- important for cross-environment evidence
 
-One-paragraph structure:
+### KA59
+- the cleanest current mechanics-discovery slice
+- smallest controlled case
+- already has clear baselines, scenarios, benchmark output, and an epistemic-style result
+- best current environment for a readable motivating example / case study
 
-1. **Problem**
-   Existing agent evaluations focus on task completion or final score, which can hide whether an agent actually inferred the latent mechanics of the environment.
+## Current strongest paper claim
 
-2. **Approach**
-   We introduce a benchmark framing that factorizes difficulty along World / Goal / Mechanics / Feedback, and we track epistemic traces of what the agent appears to have discovered through interaction.
+### Conservative version
+Current agent evaluations often fail to distinguish **task completion** from **mechanic discovery**. We propose a benchmark framing for environments with hidden rules under partial specification, and show that epistemic traces can reveal failures that final outcome metrics miss.
 
-3. **Evidence**
-   Across environments including KA59, BP35, and LS20, we compare baseline agents and show that identical or near-identical final outcomes can conceal large differences in hidden-rule discovery.
+### Stronger version
+We introduce a cross-environment benchmark for **hidden-mechanic discovery under partial observability**, factorized along World / Goal / Mechanics / Feedback, and show that agents with similar outcome scores can differ sharply in whether they actually discover the latent transition structure of the task.
 
-4. **Significance**
-   The benchmark reveals a failure mode that standard outcome-only evaluation misses, giving a more faithful picture of interactive reasoning under partial observability.
+The stronger version is the one you want if the experiments support it.
 
-## Section-by-section mapping onto your NeurIPS template
+## What the current codebase already supports
 
-## 1. Introduction
+### Already real
+- environment-specific benchmark work in Zendo, BP35, LS20, and KA59
+- benchmark-axis language from the proposal / Monday framing
+- observability / belief-tracking trajectory in the project history
+- KA59 reportable baselines and a mechanics-discovery result
 
-Goal of intro:
-- explain why outcome-only evaluation is insufficient
-- define the hidden-mechanic discovery problem
-- preview the factorized benchmark idea
-- preview epistemic traces
+### Not fully real yet
+- one fully unified benchmark harness across all environments
+- one fully standardized epistemic metric shared across all environments
+- one polished final experiment table across LS20 / BP35 / KA59
 
-Minimum contributions list should look something like:
-- a benchmark framing over **World / Goal / Mechanics / Feedback**
-- multiple environments instantiating parts of that framing
-- epistemic-trace analysis that complements outcome metrics
-- empirical evidence that discovery and success can diverge
+So the paper should be ambitious in framing, but honest in what is already implemented versus still being unified.
 
-## 2. Related Work
+## Current best project-specific framing for the paper
 
-Likely buckets:
-- POMDPs / partial observability
-- agent benchmarks / ARC-like environments / interactive evaluation
-- model-based reasoning / latent dynamics / exploration
-- interpretability or behavior-trace evaluation if relevant
+> Existing agent benchmarks over-index on final score and under-measure whether an agent actually discovered the hidden mechanics of an environment. We study this problem across interactive tasks with partial specifications, factorizing difficulty along World, Goal, Mechanics, and Feedback, and using epistemic traces to measure how agent beliefs change during interaction.
 
-Important: the paper should distinguish itself from generic benchmark papers by saying it is not only measuring success, but also **mechanic discovery**.
+That is much closer to the real project than generic benchmark language.
 
-## 3. Method
+## What KA59 already gives the paper concretely
 
-### 3.1 Problem setup
-Define:
-- environment family with latent transition rules
-- agent interaction protocol
-- observable state vs hidden mechanics
-- benchmark axes: World / Goal / Mechanics / Feedback
-- epistemic trace concept
+KA59 is the strongest current small example because it already shows a clean result.
 
-### 3.2 Approach
-Describe:
-- how environments are instantiated
-- how ablations / probes are constructed
-- what metrics are collected
-- what the epistemic trace records
+Current result shape:
+- `NaiveRightAgent`, `RotateOnBlockAgent`, `MinimalHypothesisAgent` all run on the same canonical scenarios
+- in `tw_push`, only `MinimalHypothesisAgent` discovers the hidden wall-transfer asymmetry
+- in `tw_push_world_blind`, that discovery disappears under reduced observability
 
-Keep this section crisp. Do not bury the reader in implementation details too early.
+Representative numbers:
 
-## 4. Experiments
+### `tw_push`
+- `NaiveRight`: `moved=1 blocked=9 p_walls=0`
+- `RotateOnBlock`: `moved=9 blocked=1 p_walls=0`
+- `MinimalHypothesis`: `moved=7 blocked=3 p_walls=1`
 
-This section matters most.
+### `tw_push_world_blind`
+- `NaiveRight`: `moved=1 blocked=9 p_walls=0`
+- `RotateOnBlock`: `moved=9 blocked=1 p_walls=0`
+- `MinimalHypothesis`: `moved=9 blocked=1 p_walls=0`
 
-### Experimental setup
-Need:
-- environments used: LS20, BP35, KA59
-- agent set: at least simple baselines plus stronger agents later
-- evaluation protocol
-- number of runs / seeds if applicable
-- metrics
+This gives a nice paper-facing statement:
+- the discovery-capable agent finds the hidden mechanic in the fully observed mechanics probe
+- that same discovery vanishes when observability is degraded
 
-### Main results
-Need at least some combination of:
-- task success / score
-- discovery metric
-- epistemic-trace metric
-- per-axis or per-environment breakdown
+That is not the whole paper, but it is already a credible figure / motivating result.
 
-### Ablations and analysis
-Natural things to include:
-- World observability changes
-- Mechanics contrastive pairs
-- where win/success and discovery diverge
-- case studies from KA59 / BP35
+## What the paper should say about benchmark axes
 
-## What KA59 already gives you
+The paper should not claim that every environment fully instantiates every axis equally.
 
-KA59 already supports a clean small result:
-- hidden mechanics are discoverable through interaction
-- simple baselines differ behaviorally
-- reduced observability suppresses discovery
+Instead, say something like:
 
-That makes KA59 a strong **analysis figure / motivating result**, but probably not the whole NeurIPS paper alone.
+- the benchmark family is organized around **World / Goal / Mechanics / Feedback**
+- different environments and conditions instantiate different slices of that space
+- some environments are currently stronger for certain axes than others
+- the benchmark is being built as a **family**, not a single monolithic task
 
-## What probably still needs to exist for a serious main-track submission
+That is both true and stronger intellectually.
 
-- cross-environment evidence, not just KA59
-- stronger agents than only toy hand-built baselines
-- one clean primary metric table that supports the main claim
-- one or two case studies that make the epistemic-trace story intuitive
-- clear limitations section
+## Actual template guidance for this project
 
-## Good result table shape
+The NeurIPS template itself is fine.
 
-Instead of generic Metric 1 / Metric 2, use something more like:
+The real work is filling it with the right story:
+- why this project exists
+- how it evolved from earlier Zendo-only work
+- why the knockout / factorized framing matters
+- how cross-environment evidence supports the claim
+- why epistemic traces are necessary beyond outcome metrics
 
-| Environment | Agent | Success | Discovery | Epistemic signal |
-|---|---|---:|---:|---:|
-| KA59 | NaiveRight | ... | ... | ... |
-| KA59 | RotateOnBlock | ... | ... | ... |
-| KA59 | MinimalHypothesis | ... | ... | ... |
-| BP35 | ... | ... | ... | ... |
-| LS20 | ... | ... | ... | ... |
+## Draft abstract extract (v0)
 
-Where:
-- **Success** = completion / score / progress
-- **Discovery** = whether hidden mechanic was behaviorally inferred
-- **Epistemic signal** = trace-derived summary metric
+```text
+Current agent evaluations often emphasize final success or score while under-measuring whether an agent actually discovered the latent mechanics of the task. We study hidden-mechanic discovery in interactive environments with partial specification, framing evaluation along four separable axes: World, Goal, Mechanics, and Feedback. We build a benchmark family spanning multiple environments, including controlled mechanics probes and more interaction-heavy game settings, and augment outcome metrics with epistemic traces that summarize what the agent appears to have inferred during interaction. In a clean mechanics-discovery case, we show that a discovery-capable baseline can identify a hidden transition asymmetry that simpler reactive baselines miss, and that this discovery signal disappears when observability is degraded. These results illustrate how similar task outcomes can mask large differences in latent-rule discovery, motivating benchmark designs that evaluate belief formation in addition to task completion.
+```
 
-## Limitation section should be explicit
+## Draft introduction opening extract (v0)
 
-Be honest about:
-- current environment count
-- current agent strength
-- whether the epistemic metric is hand-designed
-- which benchmark axes are only partially instantiated
-- whether results are benchmark-specific
+```text
+Many recent agent evaluations focus on whether a model eventually solves a task, reaches a goal, or achieves a high final score. However, in interactive environments with hidden rules, final outcome alone is often an incomplete measure of competence. An agent may succeed through brittle heuristics without discovering the true mechanics of the environment, or fail despite forming a partially correct internal model of the task. If the goal is to understand interactive reasoning under partial observability, then we need evaluations that distinguish task completion from latent-mechanic discovery.
 
-That honesty helps more than pretending completeness.
+This paper studies that gap. We frame interactive agent evaluation as a family of partially specified environments in which different aspects of the task can be weakened or withheld: the observable world state, the objective, the transition mechanics, or the feedback signal. This yields a benchmark perspective organized around four capability axes, World, Goal, Mechanics, and Feedback. Across environments in this family, we ask not only whether an agent succeeds, but also what it appears to have learned while interacting.
+
+To make this measurable, we pair standard outcome metrics with epistemic traces: compact summaries of how an agent's working hypotheses or inferred structure evolve over time. This lets us detect cases where agents with similar outcomes differ substantially in what they have actually discovered about the environment.
+```
+
+## Draft contribution bullets (v0)
+
+```text
+Our contributions are:
+(1) a benchmark framing for hidden-mechanic discovery under partial observability, organized along World, Goal, Mechanics, and Feedback;
+(2) a multi-environment benchmark family spanning environments with different interaction and discovery profiles;
+(3) epistemic-trace measurements that complement standard outcome metrics by tracking discovery behavior during interaction; and
+(4) empirical evidence that outcome metrics alone can hide major differences in latent-rule discovery.
+```
+
+## Draft method / problem setup extract (v0)
+
+```text
+We consider interactive environments in which the agent observes only a partial specification of the task. Some aspects of the environment may be directly observable, while others, including parts of the transition dynamics, objective specification, or evaluative feedback, may be withheld or weakened. We organize these sources of uncertainty into four benchmark axes: World, Goal, Mechanics, and Feedback. A benchmark condition is defined by an environment together with a choice of which axes are fully specified, weakened, or partially hidden.
+
+In this setting, evaluation should capture more than terminal success. We therefore separate outcome metrics from discovery metrics. Outcome metrics measure task completion, progress, or score. Discovery metrics instead ask whether the agent behaviorally demonstrates knowledge of a hidden rule or latent transition pattern. In addition, we collect epistemic traces, lightweight summaries of the agent's evolving hypotheses or discovered structure over the course of an episode.
+```
+
+## Draft experiments setup extract (v0)
+
+```text
+We evaluate agents across multiple environments that instantiate different discovery demands. These include a controlled mechanics probe, KA59, which isolates hidden transition asymmetries in a minimal setting; BP35, a more interaction-heavy environment involving clicks, gravity, and forward planning; and LS20, which broadens the benchmark beyond a single bespoke game. For each environment, we define conditions that map onto the benchmark axes where possible, and compare baseline agents with differing levels of adaptivity and hypothesis tracking.
+
+Our evaluation reports both standard outcome metrics and discovery-oriented measurements. In KA59, for example, we measure whether an agent discovers the wall-transfer asymmetry and how this changes under degraded observability. More generally, we test whether similar task outcomes can conceal different levels of latent-rule discovery across environments and conditions.
+```
+
+## Draft limitations paragraph (v0)
+
+```text
+This work is currently limited by the number and maturity of benchmark environments, as well as by the strength and diversity of the evaluated agents. Not all environments instantiate all four benchmark axes equally cleanly, and some axis mappings are currently stronger proxies than full binary removals. In addition, our current epistemic-trace measurements are partly hand-designed and environment-dependent, rather than fully standardized across the entire benchmark family. We therefore view the present results as evidence for the usefulness of discovery-oriented evaluation, rather than as a final complete benchmark.
+```
+
+## What the experiments section should concretely show
+
+At minimum, the paper needs:
+
+1. **One clean motivating result**
+   - KA59 is currently best for this
+2. **Cross-environment evidence**
+   - LS20 + BP35 + KA59 should support the same higher-level claim
+3. **A table where outcome and discovery diverge**
+   - this is the paper's key empirical moment
+4. **At least one epistemic-trace case study**
+   - ideally one clean figure
+
+## A more accurate table shape than the generic template
+
+| Environment | Condition | Agent | Outcome | Discovery | Epistemic signal |
+|---|---|---:|---:|---:|---:|
+| KA59 | Mechanics probe | NaiveRight | ... | ... | ... |
+| KA59 | Mechanics probe | MinimalHypothesis | ... | ... | ... |
+| KA59 | World-degraded | MinimalHypothesis | ... | ... | ... |
+| BP35 | ... | ... | ... | ... | ... |
+| LS20 | ... | ... | ... | ... | ... |
+
+## What still needs to be true for a serious NeurIPS main-track push
+
+- stronger agents than only toy handcrafted baselines
+- consistent cross-environment evidence
+- a crisp statement of what prior evaluation misses
+- a clear discovery metric and epistemic metric story
+- disciplined limitations section
+
+So the strongest honest position is:
+- **direction:** strong
+- **current artifacts:** promising but not yet enough by themselves
+- **next step:** convert the current environment work into one coherent cross-environment experiment story
 
 ## Practical recommendation
 
-Use the downloaded NeurIPS template unchanged.
+Use the downloaded NeurIPS template unchanged, but fill it from this project-specific framing rather than generic benchmark language.
 
-Then start writing into it with this structure:
-- intro claim
-- benchmark framing
-- environment mapping
-- experiments table
-- limitations
+If you want to start writing immediately, the best order is:
+1. abstract
+2. introduction
+3. contributions
+4. experimental setup table
+5. limitations
 
-Do **not** spend time polishing LaTeX right now.
-Spend time clarifying:
-- exact claim
-- exact metrics
-- exact cross-environment evidence needed
+That will force the actual claim to become precise before the rest of the draft fills in.
