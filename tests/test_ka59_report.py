@@ -191,6 +191,26 @@ class TestResultColumns:
 
 
 # ---------------------------------------------------------------------------
+# 5b. Discovery-gap summary
+# ---------------------------------------------------------------------------
+
+class TestDiscoveryGapSummary:
+    def test_discovery_gap_section_present(self):
+        out = generate_report()
+        assert "DISCOVERY GAP SNAPSHOT" in out
+
+    def test_tw_push_calls_out_outcome_vs_discovery_divergence(self):
+        out = generate_report()
+        assert "tw_push" in out
+        assert "worse outcome, stronger discovery" in out
+
+    def test_world_blind_calls_out_discovery_disappears(self):
+        out = generate_report()
+        assert "tw_push_world_blind" in out or "world_blind" in out
+        assert "discovery disappears under degraded observation" in out
+
+
+# ---------------------------------------------------------------------------
 # 6. Epistemic highlights
 # ---------------------------------------------------------------------------
 

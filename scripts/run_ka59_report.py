@@ -158,6 +158,49 @@ def _results_section(results: dict[str, BenchmarkResult]) -> str:
     return "\n".join(lines)
 
 
+def _discovery_gap_section(results: dict[str, BenchmarkResult]) -> str:
+    lines = [_section("DISCOVERY GAP SNAPSHOT")]
+    lines.append(
+        "  scenario                outcome signal                 discovery signal  read"
+    )
+    lines.append("  " + _hr("·", 68))
+
+    baseline_names = ["NaiveRightAgent", "RotateOnBlockAgent"]
+    hyp = results["MinimalHypothesisAgent"]
+
+    tw_push = hyp.by_name("transfer_wall_push")
+    tw_push_baseline_best = max(
+        results[name].by_name("transfer_wall_push").moved_count
+        for name in baseline_names
+    )
+    lines.append(
+        "  "
+        f"{'tw_push':<22}  "
+        f"{f'hypothesis moved {tw_push.moved_count} vs baseline {tw_push_baseline_best}':<30}  "
+        f"{f'p_walls={tw_push.passable_walls_found}':<16}  "
+        "worse outcome, stronger discovery"
+    )
+
+    tw_blind = hyp.by_name("transfer_wall_push_world_blind")
+    tw_blind_baseline_best = max(
+        results[name].by_name("transfer_wall_push_world_blind").moved_count
+        for name in baseline_names
+    )
+    lines.append(
+        "  "
+        f"{'tw_push_world_blind':<22}  "
+        f"{f'hypothesis moved {tw_blind.moved_count} vs baseline {tw_blind_baseline_best}':<30}  "
+        f"{f'p_walls={tw_blind.passable_walls_found}':<16}  "
+        "discovery disappears under degraded observation"
+    )
+
+    lines.append("")
+    lines.append(
+        "  The key paper-facing point: score alone misses the mechanic discovery story."
+    )
+    return "\n".join(lines)
+
+
 def _epistemic_section(results: dict[str, BenchmarkResult]) -> str:
     lines = [_section("EPISTEMIC HIGHLIGHTS  (MinimalHypothesisAgent)")]
     lines.append(
@@ -224,6 +267,7 @@ def generate_report(max_steps: int | None = MAX_STEPS) -> str:
         _agents_section(),
         _scenarios_section(),
         _results_section(results),
+        _discovery_gap_section(results),
         _epistemic_section(results),
         _hr("═"),
         "",
