@@ -1,13 +1,13 @@
-# KA59 Status
+# KA59 branch status
 
-Current branch: `ka59`
+This note is the fastest way to understand what the `ka59` branch adds and how it fits the broader benchmark work.
 
-## What this lane is
+## What this branch is for
 
-KA59 is our **clean mechanics-discovery benchmark slice**.
+KA59 is our **smallest clean mechanics-discovery slice**.
 
-It is not trying to replace Kaus's `env4` / BP35 work.
-It complements it by giving us a small, controlled environment where hidden transition rules can be tested and compared across simple agents.
+It is **not** meant to replace Kaus's `env4` / BP35 work.
+It complements that lane by giving us a controlled environment where hidden transition rules can be tested, compared across simple agents, and reported cleanly.
 
 ## What is implemented
 
@@ -29,7 +29,7 @@ It complements it by giving us a small, controlled environment where hidden tran
 - **Goal:** none
 - **Feedback:** none
 
-This is intentional. KA59 is currently a **Mechanics-heavy benchmark**, not a full World/Goal/Mechanics/Feedback matrix.
+This is intentional. KA59 is currently a **Mechanics-heavy benchmark**, not a full World / Goal / Mechanics / Feedback matrix.
 
 ## Current result
 
@@ -68,17 +68,11 @@ That gives us a compact paper-facing result:
 - **LS20:** another environment in the broader benchmark set
 - **KA59:** smallest clean mechanics probe with readable discovery behavior
 
-## Current recommendation
+## What this branch is not trying to do
 
-Do **not** turn KA59 into a copy of BP35's JSON interface.
-KA59 already has its own simple agent-facing surface via the blind environment.
-
-Use KA59 to answer:
-- can an agent discover a hidden mechanic from transitions?
-- does reduced observability change that discovery?
-
-Use BP35 to answer:
-- can an agent plan correctly in a harder, more stateful game with clicks and gravity?
+- not a competing `env4`
+- not a replacement for BP35's JSON-heavy interface
+- not a claim that KA59 already covers the full paper
 
 ## Verification
 
