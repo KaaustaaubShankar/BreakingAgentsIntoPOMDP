@@ -105,6 +105,8 @@ def frame_to_base64_png(frame: np.ndarray, scale: int = 8) -> str:
 
 
 def _step_budget_for_level(level_index: int) -> int:
+    # Real termination for levels 1-3 is the rising moving-support platform, not this counter.
+    # For levels 4+, the engine triggers lose() when hbqwwgceeqp reaches 64 or 128.
     if level_index <= 6:
         return 64
     return 128
@@ -144,6 +146,91 @@ def _semantic_grid(game: Any) -> list[str]:
             row_chars.append(char)
         rows.append("".join(row_chars))
     return rows
+
+
+def _fall_destination(game: Any, x: int, y: int) -> list[int]:
+    """Return the tile the player would land on after gravity acts from (x, y)."""
+    dy = -1 if bool(game.vivnprldht) else 1
+    nx, ny = x, y + dy
+    width, height = game.hdnrlfmyrj.grid_size
+    last_open = [x, y]
+    while 0 <= nx < width and 0 <= ny < height:
+        names = [s.name for s in game.hdnrlfmyrj.jhzcxkveiw(nx, ny)]
+        passable = (
+            names == []
+            or names == ["oonshderxef"]
+            or names == ["aknlbboysnc"]
+            or set(names) == {"aknlbboysnc", "oonshderxef"}
+        )
+        if not passable:
+            break
+        last_open = [nx, ny]
+        ny += dy
+    return last_open
+
+
+def _is_passable_horizontal(game: Any, x: int, y: int) -> bool:
+    """True if the player can physically occupy (x, y) — i.e. no solid blocking tile."""
+    names = [s.name for s in game.hdnrlfmyrj.jhzcxkveiw(x, y)]
+    return _is_blocked(names) is False
+
+
+def _corridor_scan(game: Any, player_x: int, player_y: int) -> list[dict[str, Any]]:
+    """
+    Scan every x-column reachable horizontally from the player's current position
+    (without clicking) and report where gravity would take the player from each column.
+    Columns where landing_y != player_y are highlighted as passages.
+    """
+    width, _ = game.hdnrlfmyrj.grid_size
+    results: list[dict[str, Any]] = []
+
+    # Walk left and right from player until blocked
+    for direction in (-1, 1):
+        x = player_x + direction
+        while 0 <= x < width:
+            if not _is_passable_horizontal(game, x, player_y):
+                break
+            landing = _fall_destination(game, x, player_y)
+            entry: dict[str, Any] = {
+                "column": x,
+                "landing": landing,
+                "passage": landing[1] != player_y,
+            }
+            results.append(entry)
+            x += direction
+
+    results.sort(key=lambda e: e["column"])
+    return results
+
+
+def _moving_platform_state(game: Any) -> dict[str, Any] | None:
+    """Return the current position and moves-until-kill for the rising platform (levels 1-3 only)."""
+    level_num = int(game.qswcochjodb)
+    if level_num > 3:
+        return None
+    try:
+        supports = game.hdnrlfmyrj.wwkbcxznzg("aknlbboysnc")
+        if not supports:
+            return None
+        top_y = min(int(s.qumspquyus[1]) for s in supports)
+        player_y = int(game.twdpowducb.qumspquyus[1])
+        # Platform starts below player (higher y) and rises toward lower y.
+        # It moves up 1 tile every 2 horizontal moves. Kill when top_y reaches player_y.
+        # Distance to close = top_y - player_y (positive means platform is still below).
+        gap = top_y - player_y
+        moves_until_kill = max(0, gap * 2)
+        return {
+            "platform_top_y": top_y,
+            "player_y": player_y,
+            "tiles_below_player": gap,
+            "moves_until_kill": moves_until_kill,
+            "warning": (
+                "URGENT: rising platform will reach you in {} horizontal moves. "
+                "Clicks do not advance the platform. Move upward (toward lower y) or die."
+            ).format(moves_until_kill) if moves_until_kill <= 6 else None,
+        }
+    except Exception:
+        return None
 
 
 def get_structured_state(env: Any, frame_data: FrameDataRaw) -> dict[str, Any]:
@@ -187,6 +274,24 @@ def get_structured_state(env: Any, frame_data: FrameDataRaw) -> dict[str, Any]:
     left_names = _tile_names_at(game, player_x - 1, player_y) if player_x > 0 else ["boundary"]
     right_names = _tile_names_at(game, player_x + 1, player_y) if player_x < width - 1 else ["boundary"]
 
+    left_blocked = _is_blocked(left_names)
+    right_blocked = _is_blocked(right_names)
+
+    # Where does the player actually land after moving left/right and gravity acts?
+    left_landing = (
+        _fall_destination(game, player_x - 1, player_y)
+        if not left_blocked and player_x > 0
+        else None
+    )
+    right_landing = (
+        _fall_destination(game, player_x + 1, player_y)
+        if not right_blocked and player_x < width - 1
+        else None
+    )
+
+    moving_platform = _moving_platform_state(game)
+    corridor = _corridor_scan(game, player_x, player_y)
+
     return {
         "player": {
             "position": [player_x, player_y],
@@ -196,10 +301,12 @@ def get_structured_state(env: Any, frame_data: FrameDataRaw) -> dict[str, Any]:
         "movement": {
             "left_target": [player_x - 1, player_y] if player_x > 0 else None,
             "right_target": [player_x + 1, player_y] if player_x < width - 1 else None,
-            "left_blocked": _is_blocked(left_names),
-            "right_blocked": _is_blocked(right_names),
+            "left_blocked": left_blocked,
+            "right_blocked": right_blocked,
             "left_tile_names": left_names,
             "right_tile_names": right_names,
+            "left_landing": left_landing,
+            "right_landing": right_landing,
         },
         "level": {
             "current": level_num,
@@ -210,6 +317,8 @@ def get_structured_state(env: Any, frame_data: FrameDataRaw) -> dict[str, Any]:
             "step_budget": step_budget,
             "steps_remaining": max(0, step_budget - step_count),
         },
+        "moving_platform": moving_platform,
+        "corridor_scan": corridor,
         "objects": {
             "goals": goal_tiles,
             "spikes": spike_tiles,
