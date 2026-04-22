@@ -28,15 +28,31 @@ Important tile types:
 - `x` = breakable block. Clicking it removes it.
 - `o`, `m`, `w` = safe support tiles you can land on.
 
+Fall-destination preview:
+- The structured state includes `movement.left_landing` and `movement.right_landing`: where you will end up (after gravity fully acts) if you move left or right this turn.
+- `corridor_scan` shows the landing position for **every column** reachable horizontally without clicking. Any entry with `"passage": true` means landing there would drop you to a different y-level — a new section of the level. **Always move toward a passage column first.**
+- If no passage exists in the corridor scan, use CLICK to remove a breakable block that blocks the gravity direction, then re-evaluate.
+
+Rising platform (early levels only):
+- The structured state includes `moving_platform` when relevant. It shows how many horizontal moves remain before the rising platform kills you.
+- **CLICK actions do NOT advance the platform timer.** Only MOVE_LEFT and MOVE_RIGHT count.
+- When `moves_until_kill` is low, stop horizontal bouncing immediately and commit to a forward path.
+
 Planning rules:
-1. Think in terms of where a left/right move will make you land after gravity finishes acting.
-2. Before clicking, check whether the click changes the path the player will take.
-3. Preserve `UNDO` for recovery when you realize a click or move created a bad position.
-4. Watch the step budget closely. Fast solutions matter.
+1. Check `left_landing` and `right_landing` each turn. If one of them is at a very different `y`, that is a passage — use it.
+2. For every MOVE_LEFT or MOVE_RIGHT, confirm `left_landing`/`right_landing` reaches a useful position and has no spikes.
+3. Spend clicks to open fall paths (remove breakable blocks that block the gravity direction), not randomly.
+4. Preserve `UNDO` for recovery when you realize a click or move created a bad position.
+5. Track `moving_platform.moves_until_kill` and prioritize upward progress over exploration when time is short.
 
 Coordinate system:
 - Positions are `[x, y]`.
 - Moving left decreases `x`. Moving right increases `x`.
+- `y` increases downward: `y=0` is the top of the grid, higher `y` is lower on screen.
+- Gravity DOWN means the player falls toward **lower** `y` values (toward `y=0`, the top) after each move.
+- Gravity UP means the player falls toward **higher** `y` values (toward the bottom) after each move.
+- A tile above the player (visually higher) has a **smaller** `y`; a tile below has a **larger** `y`.
+- The goal tile is always in the direction of gravity — you fall toward it, not away from it.
 - Use the structured state's explicit positions rather than guessing from prose.
 
 Each turn, respond with a single JSON object only:
