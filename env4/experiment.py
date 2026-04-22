@@ -529,7 +529,7 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--feedback", default="EASY", choices=["EASY", "HARD"])
     p.add_argument("--world-easy-format", default="v1", choices=list(WORLD_EASY_FORMATS))
     p.add_argument("--vision", action="store_true")
-    p.add_argument("--max-levels", type=int)
+    p.add_argument("--max-levels", type=int, default=1)
     p.add_argument("--quiet", action="store_true")
     return p.parse_args()
 
