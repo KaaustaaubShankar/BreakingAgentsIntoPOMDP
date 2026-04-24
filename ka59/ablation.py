@@ -233,7 +233,7 @@ def _parse_args() -> argparse.Namespace:
                    help="Which environments to run (default: all).")
     p.add_argument("--trials", type=int, default=3,
                    help="Trials per config (default: 3).")
-    p.add_argument("--provider", default="openrouter", choices=["openrouter"])
+    p.add_argument("--provider", default="openrouter", choices=["openrouter", "anthropic"])
     p.add_argument("--model", default="meta-llama/llama-3.3-70b-instruct:free")
     p.add_argument("--configs", nargs="+", choices=list(ALL_CONFIGS.keys()))
     p.add_argument("--world-easy-format", default="v2", choices=["v1", "v2"],

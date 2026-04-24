@@ -1,8 +1,11 @@
 """
-llm_client.py — OpenRouter client using the OpenAI-compatible SDK.
+llm_client.py — LLM client supporting OpenRouter and Anthropic.
 
-Copied verbatim from env4/llm_client.py so both environments use the same
-provider abstraction, key resolution, and JSON-extraction behaviour.
+Providers:
+  openrouter — uses OPENROUTER_API_KEY (project budget; don't use for dev)
+  anthropic  — uses ANTHROPIC_API_KEY (fast local iteration, no OpenRouter spend)
+
+Switch via --provider flag on ablation.py / experiment.py.
 """
 
 from __future__ import annotations
@@ -72,22 +75,53 @@ class LLMClient:
     def get_usage_summary(self) -> Dict[str, int]:
         return dict(self.usage_totals)
 
-    def _client(self):
+    def _openrouter_client(self):
         import openai
-
         api_key = os.environ.get("OPENROUTER_API_KEY")
         if not api_key:
-            raise ValueError("OPENROUTER_API_KEY environment variable is required.")
+            raise ValueError("OPENROUTER_API_KEY not set.")
         return openai.OpenAI(base_url=self.OPENROUTER_BASE_URL, api_key=api_key)
 
-    def generate(self, system_prompt: str, user_prompt: str) -> str:
-        if self.provider != "openrouter":
-            raise ValueError(f"Unknown provider: {self.provider}. Use 'openrouter'.")
+    def _anthropic_client(self):
+        import anthropic
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise ValueError("ANTHROPIC_API_KEY not set.")
+        return anthropic.Anthropic(api_key=api_key)
 
+    def generate(self, system_prompt: str, user_prompt: str) -> str:
+        if self.provider == "anthropic":
+            return self._generate_anthropic(system_prompt, user_prompt)
+        if self.provider == "openrouter":
+            return self._generate_openrouter(system_prompt, user_prompt)
+        raise ValueError(f"Unknown provider: {self.provider!r}. Use 'openrouter' or 'anthropic'.")
+
+    def _generate_anthropic(self, system_prompt: str, user_prompt: str) -> str:
+        client = self._anthropic_client()
+        response = client.messages.create(
+            model=self.model,
+            max_tokens=1024,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+        content = response.content[0].text if response.content else None
+        if content is None:
+            raise ValueError("Anthropic returned empty content.")
+        # Record usage in compatible format
+        class _FakeUsage:
+            input_tokens = response.usage.input_tokens
+            output_tokens = response.usage.output_tokens
+            total_tokens = response.usage.input_tokens + response.usage.output_tokens
+        class _FakeResponse:
+            usage = _FakeUsage()
+        self._record_usage(_FakeResponse())
+        return str(content)
+
+    def _generate_openrouter(self, system_prompt: str, user_prompt: str) -> str:
         import time
         for attempt in range(4):
             try:
-                response = self._client().chat.completions.create(
+                response = self._openrouter_client().chat.completions.create(
                     model=self.model,
                     messages=[
                         {"role": "system", "content": system_prompt},
