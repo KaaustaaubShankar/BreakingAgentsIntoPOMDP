@@ -84,18 +84,27 @@ class LLMClient:
         if self.provider != "openrouter":
             raise ValueError(f"Unknown provider: {self.provider}. Use 'openrouter'.")
 
-        response = self._client().chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-        )
-        self._record_usage(response)
-        content = response.choices[0].message.content
-        if content is None:
-            raise ValueError("OpenRouter returned empty content.")
-        return str(content)
+        import time
+        for attempt in range(4):
+            try:
+                response = self._client().chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                )
+                self._record_usage(response)
+                content = response.choices[0].message.content
+                if content is None:
+                    raise ValueError("OpenRouter returned empty content.")
+                return str(content)
+            except Exception as exc:
+                msg = str(exc)
+                if "429" in msg and attempt < 3:
+                    time.sleep(10 * (attempt + 1))
+                    continue
+                raise
 
     def parse_json(self, text: str) -> Dict[str, Any]:
         try:
