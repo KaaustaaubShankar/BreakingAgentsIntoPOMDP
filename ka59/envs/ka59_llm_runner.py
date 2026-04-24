@@ -1,17 +1,14 @@
 """
-ka59_llm_runner.py — Thin adapter: delegates to ka59_ref.experiment.run_agent().
+ka59_llm_runner.py — Thin adapter: delegates to ka59_game.experiment.run_agent().
 
-Replaces the original hand-rolled runner that had two critical bugs:
-  1. Weak observation: raw pixel coordinates with no semantic grid.
-     ka59_ref uses get_structured_state() → JSON with indexed grid, movement
-     hints, and step budget — same structured-state shape as LS20/BP35 easy.
-  2. Heuristic win: "passable_walls_found > 0 AND move_rate > 0.4".
-     ka59_ref checks game_state == "WIN" (real engine win condition).
+Uses the REAL KA59 arc_agi game (multi-level, up to 7 levels) instead of the
+ka59_ref synthetic micro-scenarios. Matches the pattern of ls20_runner.py and
+bp35_runner.py — real game, real win condition, real difficulty curve.
 
-Unified metric mapping (unchanged interface for runner.py):
-  invalid_clicks ← blocked_count  (= ka59_ref.moves_blocked)
-  flips          ← passable_walls_found  (= ka59_ref.push_events, push-event
-                   proxy for wall-transfer discoveries)
+Unified metric mapping:
+  invalid_clicks ← blocked_count  (= ka59_game.moves_blocked)
+  flips          ← passable_walls_found  (= ka59_game.click_actions, proxy for
+                   wall-transfer mechanic engagement)
 """
 
 from __future__ import annotations
@@ -25,10 +22,9 @@ _REPO_ROOT = Path(__file__).parents[2]  # jkj-breaking-agents/
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from ka59_ref.experiment import run_agent as _run_ref  # type: ignore
+from ka59_game.experiment import run_agent as _run_real  # type: ignore
 
-DEFAULT_SCENARIO = "transfer_wall_push"
-DEFAULT_MAX_STEPS = 64
+DEFAULT_MAX_TURNS = 128  # 7 levels × ~18 turns each
 
 
 @dataclass
@@ -45,8 +41,8 @@ class RunResult:
     history: list[dict[str, Any]] = field(default_factory=list)
     understanding: dict[str, str] = field(default_factory=dict)
     timestamp: str = ""
-    blocked_count: int = 0         # moves_blocked from ka59_ref
-    passable_walls_found: int = 0  # push_events from ka59_ref (proxy)
+    blocked_count: int = 0         # moves_blocked from ka59_game
+    passable_walls_found: int = 0  # click_actions proxy
     select_actions: int = 0
     moved_count: int = 0
 
@@ -58,26 +54,26 @@ def run_agent(
     feedback_level: str = "EASY",
     provider: str = "openrouter",
     model: str = "meta-llama/llama-3.3-70b-instruct:free",
-    scenario_name: str = DEFAULT_SCENARIO,
-    max_steps: int = DEFAULT_MAX_STEPS,
+    scenario_name: str = "ka59",   # ignored — real game has fixed levels
+    max_steps: int = DEFAULT_MAX_TURNS,
     verbose: bool = True,
 ) -> RunResult:
-    ref = _run_ref(
-        scenario=scenario_name,
+    ref = _run_real(
         world_level=world_level,
         goal_level=goal_level,
         mechanics_level=mechanics_level,
         feedback_level=feedback_level,
         provider=provider,
         model=model,
-        max_turns=max_steps,
+        max_levels=1,
+        turns_per_level=max_steps,
         verbose=verbose,
     )
     moved = max(0, ref.turns - ref.moves_blocked - ref.invalid_actions)
     return RunResult(
         config={"world": world_level, "goal": goal_level,
                 "mechanics": mechanics_level, "feedback": feedback_level},
-        scenario=scenario_name,
+        scenario="ka59_game",
         won=ref.won,
         turns=ref.turns,
         levels_completed=ref.levels_completed,
@@ -88,7 +84,7 @@ def run_agent(
         understanding=dict(ref.understanding),
         timestamp=ref.timestamp,
         blocked_count=ref.moves_blocked,
-        passable_walls_found=ref.push_events,
-        select_actions=ref.select_actions,
+        passable_walls_found=ref.click_actions,
+        select_actions=ref.click_actions,
         moved_count=moved,
     )

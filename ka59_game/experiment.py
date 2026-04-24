@@ -84,7 +84,9 @@ def save_result(result: RunResult, run_id: Optional[str] = None) -> Path:
 
 
 def _make_env():
-    arcade = arc_agi.Arcade(operation_mode=OperationMode.OFFLINE)
+    from pathlib import Path
+    env_dir = str(Path(__file__).parents[1] / "environment_files")
+    arcade = arc_agi.Arcade(operation_mode=OperationMode.OFFLINE, environments_dir=env_dir)
     return arcade.make("ka59", render_mode=None)
 
 
