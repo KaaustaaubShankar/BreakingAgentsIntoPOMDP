@@ -84,10 +84,25 @@ class LLMClient:
 
     def _anthropic_client(self):
         import anthropic
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        api_key = os.environ.get("ANTHROPIC_API_KEY") or self._claude_code_token()
         if not api_key:
-            raise ValueError("ANTHROPIC_API_KEY not set.")
+            raise ValueError(
+                "ANTHROPIC_API_KEY not set and no Claude Code credentials found "
+                "at ~/.claude/.credentials.json"
+            )
         return anthropic.Anthropic(api_key=api_key)
+
+    @staticmethod
+    def _claude_code_token() -> str | None:
+        """Fall back to the local Claude Code OAuth token if available."""
+        import json
+        from pathlib import Path
+        creds_path = Path.home() / ".claude" / ".credentials.json"
+        try:
+            creds = json.loads(creds_path.read_text())
+            return creds.get("claudeAiOauth", {}).get("accessToken")
+        except Exception:
+            return None
 
     def generate(self, system_prompt: str, user_prompt: str) -> str:
         if self.provider == "anthropic":
