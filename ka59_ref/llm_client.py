@@ -112,13 +112,23 @@ class LLMClient:
         raise ValueError(f"Unknown provider: {self.provider!r}. Use 'openrouter' or 'anthropic'.")
 
     def _generate_anthropic(self, system_prompt: str, user_prompt: str) -> str:
+        import time
         client = self._anthropic_client()
-        response = client.messages.create(
-            model=self.model,
-            max_tokens=1024,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}],
-        )
+        for attempt in range(4):
+            try:
+                response = client.messages.create(
+                    model=self.model,
+                    max_tokens=1024,
+                    system=system_prompt,
+                    messages=[{"role": "user", "content": user_prompt}],
+                )
+                break
+            except Exception as exc:
+                msg = str(exc)
+                if ("429" in msg or "rate_limit" in msg.lower()) and attempt < 3:
+                    time.sleep(15 * (attempt + 1))
+                    continue
+                raise
         content = response.content[0].text if response.content else None
         if content is None:
             raise ValueError("Anthropic returned empty content.")
