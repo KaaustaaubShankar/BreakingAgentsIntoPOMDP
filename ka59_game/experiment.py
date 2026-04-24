@@ -102,8 +102,8 @@ def _grid_to_click_data(env, grid_x: int, grid_y: int) -> dict[str, int]:
     offset_x = (cam.MAX_DIMENSION - cam.width) // 2
     offset_y = (cam.MAX_DIMENSION - cam.height) // 2
     return {
-        "x": int(grid_x) + int(cam.x) + offset_x + STEP // 2,
-        "y": int(grid_y) + int(cam.y) + offset_y + STEP // 2,
+        "x": int(grid_x) + int(cam.x) + offset_x,
+        "y": int(grid_y) + int(cam.y) + offset_y,
     }
 
 

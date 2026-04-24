@@ -26,7 +26,7 @@ SUPPORTED_ENVS = ("bp35", "ls20", "ka59")
 
 # Default scenario for KA59 LLM runs (mechanics-discovery probe)
 KA59_DEFAULT_SCENARIO = "transfer_wall_push"
-KA59_DEFAULT_MAX_STEPS = 64
+KA59_DEFAULT_MAX_STEPS = 200
 
 
 def run_one(

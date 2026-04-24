@@ -24,7 +24,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from ka59_game.experiment import run_agent as _run_real  # type: ignore
 
-DEFAULT_MAX_TURNS = 128  # 7 levels × ~18 turns each
+DEFAULT_MAX_TURNS = 200  # real game levels need more headroom than synthetic scenarios
 
 
 @dataclass
