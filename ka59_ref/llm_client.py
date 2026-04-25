@@ -113,7 +113,28 @@ class LLMClient:
             return self._generate_claude_cli(system_prompt, user_prompt)
         if self.provider == "openai":
             return self._generate_openai(system_prompt, user_prompt)
-        raise ValueError(f"Unknown provider: {self.provider!r}. Use 'openrouter', 'anthropic', 'claude-cli', or 'openai'.")
+        if self.provider == "xai":
+            return self._generate_xai(system_prompt, user_prompt)
+        raise ValueError(f"Unknown provider: {self.provider!r}. Use 'openrouter', 'anthropic', 'claude-cli', 'openai', or 'xai'.")
+
+    def _generate_xai(self, system_prompt: str, user_prompt: str) -> str:
+        import openai as _openai
+        api_key = os.environ.get("XAI_API_KEY")
+        if not api_key:
+            raise ValueError("XAI_API_KEY not set.")
+        client = _openai.OpenAI(api_key=api_key, base_url="https://api.x.ai/v1")
+        resp = client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            max_tokens=1024,
+        )
+        content = resp.choices[0].message.content
+        if content is None:
+            raise ValueError("xAI returned empty content.")
+        return str(content)
 
     def _generate_openai(self, system_prompt: str, user_prompt: str) -> str:
         import openai as _openai
