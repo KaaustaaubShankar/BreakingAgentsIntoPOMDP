@@ -109,7 +109,28 @@ class LLMClient:
             return self._generate_anthropic(system_prompt, user_prompt)
         if self.provider == "openrouter":
             return self._generate_openrouter(system_prompt, user_prompt)
-        raise ValueError(f"Unknown provider: {self.provider!r}. Use 'openrouter' or 'anthropic'.")
+        if self.provider == "claude-cli":
+            return self._generate_claude_cli(system_prompt, user_prompt)
+        raise ValueError(f"Unknown provider: {self.provider!r}. Use 'openrouter', 'anthropic', or 'claude-cli'.")
+
+    def _generate_claude_cli(self, system_prompt: str, user_prompt: str) -> str:
+        """Route through `claude -p` CLI — uses Claude Code OAuth, bypasses direct API rate limits."""
+        import subprocess
+        full_prompt = f"{system_prompt}\n\n{user_prompt}" if system_prompt else user_prompt
+        result = subprocess.run(
+            ["claude", "-p", "--output-format", "json", "--model", self.model],
+            input=full_prompt,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"claude-cli error: {result.stderr[:300]}")
+        import json as _json
+        data = _json.loads(result.stdout)
+        if data.get("is_error") or data.get("subtype") != "success":
+            raise RuntimeError(f"claude-cli returned error: {result.stdout[:300]}")
+        return str(data["result"])
 
     def _generate_anthropic(self, system_prompt: str, user_prompt: str) -> str:
         import time

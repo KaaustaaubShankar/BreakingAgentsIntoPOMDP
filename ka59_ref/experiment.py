@@ -401,7 +401,7 @@ def run_agent(
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Run KA59 single-run experiment.")
     p.add_argument("--scenario", default="transfer_wall_push", choices=sorted(SCENARIOS.keys()))
-    p.add_argument("--provider", default="openrouter", choices=["openrouter", "anthropic"])
+    p.add_argument("--provider", default="openrouter", choices=["openrouter", "anthropic", "claude-cli"])
     p.add_argument("--model", default="meta-llama/llama-3.3-70b-instruct:free")
     p.add_argument("--world", default="EASY", choices=["EASY", "HARD"])
     p.add_argument("--goal", default="EASY", choices=["EASY", "HARD"])
