@@ -1,29 +1,66 @@
-# ASI-Evolve config for KA59 experiment
+# ASI-Evolve config for KA59 Mechanics Discovery experiment
+
+experiment_name: "ka59_pomdp"
 
 api:
+  provider: "openai"
   base_url: "https://openrouter.ai/api/v1"
-  api_key_env: "OPENROUTER_API_KEY"
+  api_key: "${OPENROUTER_API_KEY}"
   model: "openai/gpt-4o"
+  temperature: 0.7
+  top_p: 0.9
+  max_tokens: 8192
+  seed: 42
+  timeout: 300
+  retry_times: 3
+  retry_delay: 5
 
-experiment:
-  name: ka59_mechanics_discovery
-  problem_file: experiments/asi_evolve_ka59/input.md
-  initial_program: experiments/asi_evolve_ka59/initial_program.py
-  cognition_dir: experiments/asi_evolve_ka59/cognition_data
-  eval_script: experiments/asi_evolve_ka59/eval.sh
-  output_dir: experiments/asi_evolve_ka59/results
+logging:
+  level: "INFO"
+  console: true
+  wandb:
+    enabled: false
 
 pipeline:
-  steps: 30
-  sample_n: 3
-  parallel:
-    num_workers: 1  # arc_agi is not thread-safe; keep sequential
+  agents:
+    manager: false
+    researcher: true
+    engineer: true
+    analyzer: true
 
-database:
-  sampling:
-    algorithm: ucb1
-  storage_dir: experiments/asi_evolve_ka59/db
+  researcher:
+    diff_based_evolution: true
+    max_code_length: 8000
+
+  max_retries:
+    researcher: 3
+    engineer: 2
+    analyzer: 2
+
+  engineer_timeout: 300
+
+  parallel:
+    num_workers: 1  # arc_agi is not thread-safe
+
+  sample_n: 3
+
+  judge:
+    enabled: false
 
 cognition:
+  storage_dir: "cognition_data"
+  embedding:
+    model: "sentence-transformers/all-MiniLM-L6-v2"
+    dimension: 384
   retrieval:
     top_k: 4
+    score_threshold: 0.3
+
+database:
+  storage_dir: "database_data"
+  sampling:
+    algorithm: "ucb1"
+    ucb1_c: 1.414
+  embedding:
+    model: "sentence-transformers/all-MiniLM-L6-v2"
+    dimension: 384
