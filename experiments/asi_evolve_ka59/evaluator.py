@@ -5,7 +5,7 @@ Usage (called by eval.sh):
     python evaluator.py <candidate_path>
 
 Loads the candidate's agent_step() function, runs it against the real KA59
-game via ka59_game/experiment.py infrastructure, returns a JSON score.
+game, returns a JSON score.
 
 Score = average levels_completed across TRIALS runs (max 7 per trial).
 """
@@ -15,7 +15,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
-import os
+from importlib.machinery import SourceFileLoader
 from pathlib import Path
 
 # Ensure the repo root is on the path so ka59_game imports work
@@ -24,84 +24,117 @@ sys.path.insert(0, str(REPO_ROOT))
 
 import arc_agi
 from arc_agi import OperationMode
-from arcengine import FrameDataRaw, GameAction
 
 from ka59_game.game_interface import (
     ACTION_MAP,
     build_feedback_easy,
     get_structured_state,
 )
-from ka59_game.experiment import DEFAULT_TURNS_PER_LEVEL, MAX_LEVELS_HARD_CAP
+from ka59_game.experiment import (
+    DEFAULT_TURNS_PER_LEVEL,
+    MAX_LEVELS_HARD_CAP,
+    _grid_to_click_data,
+    _make_env,
+)
 
-TRIALS = 3  # average over this many episodes
-STEP_CAP = DEFAULT_TURNS_PER_LEVEL  # 64 per level
+TRIALS = 3
 
 
 def load_candidate(path: str):
-    spec = importlib.util.spec_from_file_location("candidate", path)
+    loader = SourceFileLoader("candidate", path)
+    spec = importlib.util.spec_from_loader("candidate", loader)
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    loader.exec_module(mod)
     return mod.agent_step
 
 
 def run_episode(agent_step_fn) -> dict:
     """Run one full KA59 game, return metrics."""
-    env = arc_agi.Arcade(operation_mode=OperationMode.OFFLINE).make("ka59", render_mode=None)
-    fd: FrameDataRaw = env.observation_space
+    env = _make_env()
+    frame_data = env.observation_space
+    if frame_data is None:
+        return {"score": 0.0, "error": "observation_space is None"}
+
+    levels_to_play = min(int(frame_data.win_levels), MAX_LEVELS_HARD_CAP)
+    turns_per_level = DEFAULT_TURNS_PER_LEVEL
+    max_turns = levels_to_play * turns_per_level
 
     history: list[dict] = []
     levels_completed = 0
-    total_turns = 0
     won = False
 
-    turns_this_level = 0
-    state = get_structured_state(env, fd, 0, STEP_CAP)
+    last_level_index = 0
+    turn_in_level = 0
 
-    while state["game_state"] == "IN_PROGRESS":
+    for turn in range(1, max_turns + 1):
+        curr_level_index = int(env._game.level_index)
+        if curr_level_index != last_level_index:
+            turn_in_level = 0
+            last_level_index = curr_level_index
+        turn_in_level += 1
+
+        curr_state = get_structured_state(env, frame_data, turn_in_level, turns_per_level)
+        game_state = curr_state.get("game_state", "IN_PROGRESS")
+
+        if game_state not in ("IN_PROGRESS", "LEVEL_COMPLETE"):
+            if game_state == "WIN":
+                won = True
+                levels_completed = levels_to_play
+            break
+
         try:
-            action_dict = agent_step_fn(state, history)
-        except Exception as e:
+            action_dict = agent_step_fn(curr_state, history)
+        except Exception:
             action_dict = {"action": "MOVE_RIGHT"}
 
-        action_name = action_dict.get("action", "MOVE_RIGHT")
-        prev_state = state
+        action_name = str(action_dict.get("action", "MOVE_RIGHT")).upper().strip()
+        action_data = None
+        game_action = None
 
         if action_name == "CLICK":
             tpos = action_dict.get("target_position")
-            if tpos:
-                from ka59_game.experiment import _grid_to_click_data
-                ga = GameAction(action_id=ACTION_MAP["CLICK"], data=_grid_to_click_data(tpos))
+            if isinstance(tpos, (list, tuple)) and len(tpos) == 2:
+                try:
+                    gx, gy = int(tpos[0]), int(tpos[1])
+                    game_action = ACTION_MAP["CLICK"]
+                    action_data = _grid_to_click_data(env, gx, gy)
+                except Exception:
+                    game_action = ACTION_MAP["MOVE_RIGHT"]
             else:
-                ga = GameAction(action_id=ACTION_MAP.get("MOVE_RIGHT", 1))
+                game_action = ACTION_MAP["MOVE_RIGHT"]
+        elif action_name in ACTION_MAP:
+            game_action = ACTION_MAP[action_name]
         else:
-            action_id = ACTION_MAP.get(action_name, ACTION_MAP["MOVE_RIGHT"])
-            ga = GameAction(action_id=action_id)
+            game_action = ACTION_MAP["MOVE_RIGHT"]
 
-        fd = env.step(ga)
-        state = get_structured_state(env, fd, turns_this_level + 1, STEP_CAP - turns_this_level - 1)
+        prev_state = curr_state
+        try:
+            frame_data = env.step(game_action, data=action_data)
+        except Exception:
+            break
 
-        moved = (state["player"]["position"] != prev_state["player"]["position"])
+        if frame_data is None:
+            break
+
+        new_state = get_structured_state(env, frame_data, turn_in_level, turns_per_level)
+        moved = (new_state["player"]["position"] != prev_state["player"]["position"])
+
         history.append({"state": prev_state, "action": action_dict, "moved": moved})
-        total_turns += 1
-        turns_this_level += 1
 
-        game_state = state["game_state"]
-        if game_state == "WIN":
+        new_game_state = new_state.get("game_state", "IN_PROGRESS")
+        if new_game_state == "WIN":
             won = True
+            levels_completed = levels_to_play
             break
-        if game_state == "LEVEL_COMPLETE" or turns_this_level >= STEP_CAP:
-            if game_state == "LEVEL_COMPLETE":
-                levels_completed += 1
-            turns_this_level = 0
-
-        if total_turns > MAX_LEVELS_HARD_CAP * STEP_CAP + 50:
-            break
+        if new_game_state == "LEVEL_COMPLETE":
+            levels_completed += 1
+            turn_in_level = 0
 
     return {
         "won": won,
-        "levels_completed": levels_completed + (1 if won else 0),
-        "total_turns": total_turns,
-        "score": float(levels_completed + (1 if won else 0)),
+        "levels_completed": levels_completed,
+        "total_turns": len(history),
+        "score": float(levels_completed),
     }
 
 
@@ -119,7 +152,7 @@ def main():
 
     scores = []
     all_metrics = []
-    for trial in range(TRIALS):
+    for _ in range(TRIALS):
         try:
             result = run_episode(agent_fn)
             scores.append(result["score"])
