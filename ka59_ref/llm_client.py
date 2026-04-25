@@ -111,7 +111,28 @@ class LLMClient:
             return self._generate_openrouter(system_prompt, user_prompt)
         if self.provider == "claude-cli":
             return self._generate_claude_cli(system_prompt, user_prompt)
-        raise ValueError(f"Unknown provider: {self.provider!r}. Use 'openrouter', 'anthropic', or 'claude-cli'.")
+        if self.provider == "openai":
+            return self._generate_openai(system_prompt, user_prompt)
+        raise ValueError(f"Unknown provider: {self.provider!r}. Use 'openrouter', 'anthropic', 'claude-cli', or 'openai'.")
+
+    def _generate_openai(self, system_prompt: str, user_prompt: str) -> str:
+        import openai as _openai
+        api_key = os.environ.get("OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError("OPENAI_API_KEY not set.")
+        client = _openai.OpenAI(api_key=api_key)
+        resp = client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            max_tokens=1024,
+        )
+        content = resp.choices[0].message.content
+        if content is None:
+            raise ValueError("OpenAI returned empty content.")
+        return str(content)
 
     def _generate_claude_cli(self, system_prompt: str, user_prompt: str) -> str:
         """Route through `claude -p` CLI — uses Claude Code OAuth with token refresh.
