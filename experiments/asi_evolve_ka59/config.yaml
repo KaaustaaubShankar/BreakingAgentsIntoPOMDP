@@ -1,0 +1,29 @@
+# ASI-Evolve config for KA59 experiment
+
+api:
+  base_url: "https://openrouter.ai/api/v1"
+  api_key_env: "OPENROUTER_API_KEY"
+  model: "openai/gpt-4o"
+
+experiment:
+  name: ka59_mechanics_discovery
+  problem_file: experiments/asi_evolve_ka59/input.md
+  initial_program: experiments/asi_evolve_ka59/initial_program.py
+  cognition_dir: experiments/asi_evolve_ka59/cognition_data
+  eval_script: experiments/asi_evolve_ka59/eval.sh
+  output_dir: experiments/asi_evolve_ka59/results
+
+pipeline:
+  steps: 30
+  sample_n: 3
+  parallel:
+    num_workers: 1  # arc_agi is not thread-safe; keep sequential
+
+database:
+  sampling:
+    algorithm: ucb1
+  storage_dir: experiments/asi_evolve_ka59/db
+
+cognition:
+  retrieval:
+    top_k: 4
