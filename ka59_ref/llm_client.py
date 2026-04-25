@@ -114,15 +114,22 @@ class LLMClient:
         raise ValueError(f"Unknown provider: {self.provider!r}. Use 'openrouter', 'anthropic', or 'claude-cli'.")
 
     def _generate_claude_cli(self, system_prompt: str, user_prompt: str) -> str:
-        """Route through `claude -p` CLI — uses Claude Code OAuth, bypasses direct API rate limits."""
+        """Route through `claude -p` CLI — uses Claude Code OAuth with token refresh.
+
+        Runs from /tmp to avoid loading workspace CLAUDE.md context.
+        Cost: ~$0.04/turn for Sonnet (8K base context cached after turn 1).
+        """
         import subprocess
         full_prompt = f"{system_prompt}\n\n{user_prompt}" if system_prompt else user_prompt
         result = subprocess.run(
-            ["claude", "-p", "--output-format", "json", "--model", self.model],
-            input=full_prompt,
+            ["claude", "-p", "--output-format", "json",
+             "--model", self.model,
+             "--system-prompt", system_prompt or "You are a helpful assistant."],
+            input=user_prompt,
             capture_output=True,
             text=True,
             timeout=120,
+            cwd="/tmp",
         )
         if result.returncode != 0:
             raise RuntimeError(f"claude-cli error: {result.stderr[:300]}")
