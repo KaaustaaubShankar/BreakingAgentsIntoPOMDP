@@ -1,7 +1,7 @@
 {
   "items": {
-    "e39ca221-c7eb-4d38-b959-f6451feda187": {
-      "id": "e39ca221-c7eb-4d38-b959-f6451feda187",
+    "59d0c756-238e-4bc3-95b9-f5d0a72d5aac": {
+      "id": "59d0c756-238e-4bc3-95b9-f5d0a72d5aac",
       "content": "KA59 is a multi-level grid puzzle. The agent controls a selected piece (P in the grid) and must progress through 7 levels. Each level has goal tile(s) marked +. Winning a level advances to the next; winning level 7 ends the run. The step budget is 64 turns per level — exceeding it fails that level.",
       "source": "KA59 Game Overview",
       "metadata": {
@@ -9,8 +9,8 @@
         "importance": "critical"
       }
     },
-    "db32d693-d7d9-4023-bd12-22ec46df6705": {
-      "id": "db32d693-d7d9-4023-bd12-22ec46df6705",
+    "ca7953a9-7718-41f1-ab5a-d5d67c8f599b": {
+      "id": "ca7953a9-7718-41f1-ab5a-d5d67c8f599b",
       "content": "Five actions: MOVE_LEFT, MOVE_RIGHT, MOVE_UP, MOVE_DOWN, CLICK. Movement shifts the selected piece by exactly one cell (3 pixels) per action. CLICK requires target_position [x, y] in pixel coordinates — use it to switch control to another selectable piece (S in the grid). Return {'action': 'MOVE_RIGHT'} or {'action': 'CLICK', 'target_position': [x, y]}.",
       "source": "Action Space",
       "metadata": {
@@ -18,8 +18,8 @@
         "importance": "critical"
       }
     },
-    "50eaa277-f77f-4d85-ad26-420e5d1f6b8c": {
-      "id": "50eaa277-f77f-4d85-ad26-420e5d1f6b8c",
+    "79e4df6e-9b44-4ac6-90ad-bafd8e53e4d3": {
+      "id": "79e4df6e-9b44-4ac6-90ad-bafd8e53e4d3",
       "content": "Each turn: state['semantic_grid'] is an ASCII grid (P=selected, S=other selectable, B=block, #=wall, +=goal, .=empty). state['player']['position'] is [x, y] in pixels. state['objects'] has selectables/blocks/walls/goals, each with position and size. state['movement']['right_blocked'] etc are heuristic hints only. state['resources']['steps_remaining'] is the remaining budget. state['level']['current'] and ['total'] show progress. Positions: x increases rightward, y increases downward, STEP=3 pixels per cell.",
       "source": "Observation Structure",
       "metadata": {
@@ -27,8 +27,8 @@
         "importance": "high"
       }
     },
-    "0b30ac7b-4c73-4442-a8b2-fc37503a53cb": {
-      "id": "0b30ac7b-4c73-4442-a8b2-fc37503a53cb",
+    "6a9ac391-aa17-433b-ba6f-2989beb8eba1": {
+      "id": "6a9ac391-aa17-433b-ba6f-2989beb8eba1",
       "content": "Selectables (P/S): player-controlled pieces, switch with CLICK. Blocks (B): pushable objects. Moving into an adjacent block pushes it one cell. Walls (#): obstruct movement — but NOT all walls behave identically. Some boundaries allow certain interactions that others block. You must probe wall behavior through interaction — do not assume uniformity. Goals (+): target tiles. Get a block or selectable onto a goal tile to win the level.",
       "source": "Object Types and Interaction",
       "metadata": {
@@ -36,8 +36,8 @@
         "importance": "high"
       }
     },
-    "2f1e518f-08e5-4182-bf94-75feda2fe03b": {
-      "id": "2f1e518f-08e5-4182-bf94-75feda2fe03b",
+    "da97c5c9-a67f-4634-b420-ed47773d3ec6": {
+      "id": "da97c5c9-a67f-4634-b420-ed47773d3ec6",
       "content": "Blocks are pushed by moving the selected piece into them. Push chains: if two blocks are lined up, pushing the first may push both. Not all push attempts succeed — if something blocks the block, the selected piece also does not move. Use history[i]['moved'] (True/False) to determine whether each action had effect. Position yourself behind a block, then push it toward the goal.",
       "source": "Pushing and Spatial Reasoning",
       "metadata": {
@@ -45,8 +45,8 @@
         "importance": "high"
       }
     },
-    "4df2e5f9-a1c2-4f02-aaf8-ffd94fbbff6a": {
-      "id": "4df2e5f9-a1c2-4f02-aaf8-ffd94fbbff6a",
+    "df2108fc-8acb-494d-9977-f414151f311e": {
+      "id": "df2108fc-8acb-494d-9977-f414151f311e",
       "content": "Static agents (fixed cycles, simple heuristics) achieve 0% win rate on KA59. They hit the 64-step limit without completing level 1. Root cause: they repeat ineffective moves without adapting their strategy. Successful agents must: detect when moves are failing (moved=False repeatedly), try alternative action sequences to probe the environment, switch pieces when stuck, and update their strategy based on what the history reveals about the game's rules.",
       "source": "Why Naive Agents Fail",
       "metadata": {
@@ -54,8 +54,8 @@
         "importance": "high"
       }
     },
-    "20135134-d569-4e73-946d-fcf57c043ded": {
-      "id": "20135134-d569-4e73-946d-fcf57c043ded",
+    "614e1852-afd8-4767-b840-b648858c1c0a": {
+      "id": "614e1852-afd8-4767-b840-b648858c1c0a",
       "content": "Use history to adapt. Key signals: moved=False for 3+ consecutive steps means you are stuck — try a different direction or CLICK. moved=True after a specific action sequence means that sequence is productive — repeat it. Count successful moves per direction; bias toward high-yield directions. If MOVE_RIGHT fails 5 times, the path is blocked — try MOVE_UP, MOVE_DOWN, or CLICK to switch piece.",
       "source": "History-Based Adaptation",
       "metadata": {
@@ -63,35 +63,79 @@
         "importance": "high"
       }
     },
-    "fb8a7a8f-344a-495b-9607-a81b5e35f641": {
-      "id": "fb8a7a8f-344a-495b-9607-a81b5e35f641",
+    "61ac71ca-8d07-4f84-8d91-9bdff0d9f772": {
+      "id": "61ac71ca-8d07-4f84-8d91-9bdff0d9f772",
       "content": "Some levels have multiple selectable pieces (S in grid). Use CLICK to switch. Different pieces may be positioned to reach different parts of the grid. If your current piece is completely stuck, switch to another piece and try from there. CLICK target_position must exactly match the pixel coordinates from state['objects']['selectables'][i]['position'] — not cell indices.",
       "source": "Multi-Piece Strategy",
       "metadata": {
         "topic": "multi_piece",
         "importance": "medium"
       }
+    },
+    "b15ea302-d343-45fd-a787-ae62c0eaf6da": {
+      "id": "b15ea302-d343-45fd-a787-ae62c0eaf6da",
+      "content": "KA59 Level 1 geometry (real game, baseline config): Two selectable pieces — Piece A starts near [9,21], Piece B at [18,21]. Piece B at [18,21] is FULLY ENCLOSED by walls and CANNOT MOVE in any direction. Do NOT waste turns trying to move Piece B — it is a decoy. Focus ALL strategy on Piece A starting at [9,21]. Goal tiles are located near [2,23].",
+      "source": "Level 1 Geometry — Real Game Analysis",
+      "metadata": {
+        "topic": "level1_geometry",
+        "importance": "critical"
+      }
+    },
+    "0b9ee03e-b42d-4240-84d9-12d9044c8f75": {
+      "id": "0b9ee03e-b42d-4240-84d9-12d9044c8f75",
+      "content": "Piece A reachable positions in Level 1: Starting at [9,21], Piece A can reach: [6,21] via MOVE_LEFT, [3,21] via MOVE_LEFT again, [3,24] via MOVE_DOWN from [3,21], [0,21] via MOVE_LEFT from [3,21]. Key discovery: MOVE_DOWN from [0,21] or [3,21] may pass through a transfer wall to reach goal area near [2,23]. The movement.down_blocked hint is UNRELIABLE for wall-transfer tiles — attempt MOVE_DOWN even when the hint says blocked.",
+      "source": "Level 1 Piece A Movement Map",
+      "metadata": {
+        "topic": "level1_movement",
+        "importance": "critical"
+      }
+    },
+    "caf017ed-cd51-4ddc-877f-0f4ed4eeb93b": {
+      "id": "caf017ed-cd51-4ddc-877f-0f4ed4eeb93b",
+      "content": "Wall-transfer asymmetry in Level 1: There exists a wall tile that LOOKS solid but allows passage in ONE direction. Specifically: a tile that blocks movement FROM the goal side but ALLOWS passage INTO the goal area from the non-goal side. To win Level 1, Piece A must reach a position adjacent to this transfer wall and push INTO it from the correct side. The movement hint (right_blocked, down_blocked, etc.) does NOT reliably detect transfer walls — you must PROBE by attempting the move. A successful transfer will show moved=True even when the hint said blocked.",
+      "source": "Wall-Transfer Mechanic — Level 1",
+      "metadata": {
+        "topic": "wall_transfer_level1",
+        "importance": "critical"
+      }
+    },
+    "4ea6f75c-3756-409d-a60e-ff93f37d3c1d": {
+      "id": "4ea6f75c-3756-409d-a60e-ff93f37d3c1d",
+      "content": "Winning strategy template for Level 1: 1. Start with Piece A (ignore Piece B entirely). 2. Move Piece A LEFT until it reaches [3,21] or [0,21]. 3. From [3,21]: attempt MOVE_DOWN — this may pass through a transfer wall to [3,24]. 4. From [0,21]: attempt MOVE_DOWN — this may transfer through a wall to reach goal area. 5. If a move succeeds that the hint said was blocked, you found the transfer wall path. 6. Continue in that direction until the WIN condition triggers. Key: do NOT cycle between pieces. Stay on Piece A and systematically probe MOVE_DOWN and MOVE_LEFT from all reachable positions.",
+      "source": "Level 1 Winning Strategy Template",
+      "metadata": {
+        "topic": "level1_strategy",
+        "importance": "critical"
+      }
     }
   },
   "str_to_int": {
-    "e39ca221-c7eb-4d38-b959-f6451feda187": 0,
-    "db32d693-d7d9-4023-bd12-22ec46df6705": 1,
-    "50eaa277-f77f-4d85-ad26-420e5d1f6b8c": 2,
-    "0b30ac7b-4c73-4442-a8b2-fc37503a53cb": 3,
-    "2f1e518f-08e5-4182-bf94-75feda2fe03b": 4,
-    "4df2e5f9-a1c2-4f02-aaf8-ffd94fbbff6a": 5,
-    "20135134-d569-4e73-946d-fcf57c043ded": 6,
-    "fb8a7a8f-344a-495b-9607-a81b5e35f641": 7
+    "59d0c756-238e-4bc3-95b9-f5d0a72d5aac": 0,
+    "ca7953a9-7718-41f1-ab5a-d5d67c8f599b": 1,
+    "79e4df6e-9b44-4ac6-90ad-bafd8e53e4d3": 2,
+    "6a9ac391-aa17-433b-ba6f-2989beb8eba1": 3,
+    "da97c5c9-a67f-4634-b420-ed47773d3ec6": 4,
+    "df2108fc-8acb-494d-9977-f414151f311e": 5,
+    "614e1852-afd8-4767-b840-b648858c1c0a": 6,
+    "61ac71ca-8d07-4f84-8d91-9bdff0d9f772": 7,
+    "b15ea302-d343-45fd-a787-ae62c0eaf6da": 8,
+    "0b9ee03e-b42d-4240-84d9-12d9044c8f75": 9,
+    "caf017ed-cd51-4ddc-877f-0f4ed4eeb93b": 10,
+    "4ea6f75c-3756-409d-a60e-ff93f37d3c1d": 11
   },
   "int_to_str": {
-    "0": "e39ca221-c7eb-4d38-b959-f6451feda187",
-    "1": "db32d693-d7d9-4023-bd12-22ec46df6705",
-    "2": "50eaa277-f77f-4d85-ad26-420e5d1f6b8c",
-    "3": "0b30ac7b-4c73-4442-a8b2-fc37503a53cb",
-    "4": "2f1e518f-08e5-4182-bf94-75feda2fe03b",
-    "5": "4df2e5f9-a1c2-4f02-aaf8-ffd94fbbff6a",
-    "6": "20135134-d569-4e73-946d-fcf57c043ded",
-    "7": "fb8a7a8f-344a-495b-9607-a81b5e35f641"
+    "0": "59d0c756-238e-4bc3-95b9-f5d0a72d5aac",
+    "1": "ca7953a9-7718-41f1-ab5a-d5d67c8f599b",
+    "2": "79e4df6e-9b44-4ac6-90ad-bafd8e53e4d3",
+    "3": "6a9ac391-aa17-433b-ba6f-2989beb8eba1",
+    "4": "da97c5c9-a67f-4634-b420-ed47773d3ec6",
+    "5": "df2108fc-8acb-494d-9977-f414151f311e",
+    "6": "614e1852-afd8-4767-b840-b648858c1c0a",
+    "7": "61ac71ca-8d07-4f84-8d91-9bdff0d9f772",
+    "8": "b15ea302-d343-45fd-a787-ae62c0eaf6da",
+    "9": "0b9ee03e-b42d-4240-84d9-12d9044c8f75",
+    "10": "caf017ed-cd51-4ddc-877f-0f4ed4eeb93b",
+    "11": "4ea6f75c-3756-409d-a60e-ff93f37d3c1d"
   },
-  "next_int_id": 8
+  "next_int_id": 12
 }

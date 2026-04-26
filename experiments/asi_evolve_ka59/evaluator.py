@@ -1,35 +1,28 @@
 """
 ASI-Evolve evaluator for KA59.
 
-Usage (called by eval.sh):
-    python evaluator.py <candidate_path>
+Usage: python3 evaluator.py <candidate_path>
 
-Loads the candidate's agent_step() function, runs it against the real KA59
-game, returns a JSON score.
-
-Score = average levels_completed across TRIALS runs (max 7 per trial).
+Score = levels_completed (0-7) for one trial.
+Per-turn timeout guards against slow agent_step implementations.
 """
 
 from __future__ import annotations
 
 import importlib.util
 import json
+import signal
 import sys
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 
-# Ensure the repo root is on the path so ka59_game imports work
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
 import arc_agi
 from arc_agi import OperationMode
 
-from ka59_game.game_interface import (
-    ACTION_MAP,
-    build_feedback_easy,
-    get_structured_state,
-)
+from ka59_game.game_interface import ACTION_MAP, get_structured_state
 from ka59_game.experiment import (
     DEFAULT_TURNS_PER_LEVEL,
     MAX_LEVELS_HARD_CAP,
@@ -37,7 +30,16 @@ from ka59_game.experiment import (
     _make_env,
 )
 
-TRIALS = 3
+TRIALS = 1          # single trial keeps eval under ~2 min
+STEP_TIMEOUT = 3    # seconds per agent_step call
+
+
+class _Timeout(Exception):
+    pass
+
+
+def _timeout_handler(signum, frame):
+    raise _Timeout()
 
 
 def load_candidate(path: str):
@@ -49,7 +51,6 @@ def load_candidate(path: str):
 
 
 def run_episode(agent_step_fn) -> dict:
-    """Run one full KA59 game, return metrics."""
     env = _make_env()
     frame_data = env.observation_space
     if frame_data is None:
@@ -62,9 +63,10 @@ def run_episode(agent_step_fn) -> dict:
     history: list[dict] = []
     levels_completed = 0
     won = False
-
     last_level_index = 0
     turn_in_level = 0
+
+    signal.signal(signal.SIGALRM, _timeout_handler)
 
     for turn in range(1, max_turns + 1):
         curr_level_index = int(env._game.level_index)
@@ -75,7 +77,6 @@ def run_episode(agent_step_fn) -> dict:
 
         curr_state = get_structured_state(env, frame_data, turn_in_level, turns_per_level)
         game_state = curr_state.get("game_state", "IN_PROGRESS")
-
         if game_state not in ("IN_PROGRESS", "LEVEL_COMPLETE"):
             if game_state == "WIN":
                 won = True
@@ -83,8 +84,13 @@ def run_episode(agent_step_fn) -> dict:
             break
 
         try:
+            signal.alarm(STEP_TIMEOUT)
             action_dict = agent_step_fn(curr_state, history)
+            signal.alarm(0)
+        except _Timeout:
+            action_dict = {"action": "MOVE_RIGHT"}
         except Exception:
+            signal.alarm(0)
             action_dict = {"action": "MOVE_RIGHT"}
 
         action_name = str(action_dict.get("action", "MOVE_RIGHT")).upper().strip()
@@ -112,13 +118,11 @@ def run_episode(agent_step_fn) -> dict:
             frame_data = env.step(game_action, data=action_data)
         except Exception:
             break
-
         if frame_data is None:
             break
 
         new_state = get_structured_state(env, frame_data, turn_in_level, turns_per_level)
         moved = (new_state["player"]["position"] != prev_state["player"]["position"])
-
         history.append({"state": prev_state, "action": action_dict, "moved": moved})
 
         new_game_state = new_state.get("game_state", "IN_PROGRESS")

@@ -1,0 +1,151 @@
+import heapq
+
+def agent_step(state, history):
+    def heuristic(a, b):
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+    
+    def a_star_search(start, goal, walls, blocks):
+        def is_passable(position):
+            return position not in walls and position not in blocks
+        # A* algorithm for pathfinding
+        frontier = []
+        heapq.heappush(frontier, (0, start))
+        came_from = {}
+        cost_so_far = {}
+        came_from[start] = None
+        cost_so_far[start] = 0
+        
+        while frontier:
+            _, current = heapq.heappop(frontier)
+            
+            if current == goal:
+                break
+            
+            for dx, dy in [(-3, 0), (3, 0), (0, -3), (0, 3)]:
+                next_step = (current[0] + dx, current[1] + dy)
+                if not is_passable(next_step):
+                    continue
+                new_cost = cost_so_far[current] + 1
+                if next_step not in cost_so_far or new_cost < cost_so_far[next_step]:
+                    cost_so_far[next_step] = new_cost
+                    priority = new_cost + heuristic(goal, next_step)
+                    heapq.heappush(frontier, (priority, next_step))
+                    came_from[next_step] = current
+        
+        # Reconstruct path
+        current = goal
+        path = []
+        while current != start:
+            if current is None:
+                return None
+            path.append(current)
+            current = came_from[current]
+        path.reverse()
+        return path
+
+    def get_move_direction(from_pos, to_pos):
+        if from_pos[0] < to_pos[0]:
+            return "MOVE_RIGHT"
+        elif from_pos[0] > to_pos[0]:
+            return "MOVE_LEFT"
+        elif from_pos[1] < to_pos[1]:
+            return "MOVE_DOWN"
+        elif from_pos[1] > to_pos[1]:
+            return "MOVE_UP"
+        return None
+
+    player_pos = tuple(state["player"]["position"])
+    goals = state["objects"]["goals"]
+    walls = {tuple(wall["position"]) for wall in state["objects"]["walls"]}
+    blocks = set()
+for block in state["objects"]["blocks"]:
+    blocks.add(tuple(block["position"]))
+# Parse semantic_grid to add additional obstacles
+semantic_grid = state["semantic_grid"].split('\n')
+for y, row in enumerate(semantic_grid):
+    for x, cell in enumerate(row):
+        if cell in ['#', 'B']:  # Walls and blocks from grid
+            blocks.add((x * 3, y * 3))  # Convert grid coordinates to pixel positions
+
+    # Consider dynamic obstacles based on movement hints and history
+    if state["movement"]["right_blocked"]:
+        blocks.add((player_pos[0] + 3, player_pos[1]))
+    if state["movement"]["left_blocked"]:
+        blocks.add((player_pos[0] - 3, player_pos[1]))
+    if state["movement"]["up_blocked"]:
+        blocks.add((player_pos[0], player_pos[1] - 3))
+    if state["movement"]["down_blocked"]:
+        blocks.add((player_pos[0], player_pos[1] + 3))
+    
+    # Add historically blocked positions from history
+    known_blocked = set()  # Temporary set for blocked positions
+    known_passable = set()  # New set for positions that were successfully traversed
+    for turn in reversed(history[-10:]):  # Limit to last 10 turns for more recent data
+        if not turn.get("moved", False) and "action" in turn and turn["action"].get("action") in ["MOVE_LEFT", "MOVE_RIGHT", "MOVE_UP", "MOVE_DOWN"]:
+            action = turn["action"]["action"]
+            prev_pos = tuple(turn["state"]["player"]["position"])  # Use previous state position
+            if action == "MOVE_RIGHT":
+                known_blocked.add((prev_pos[0] + 3, prev_pos[1]))
+            elif action == "MOVE_LEFT":
+                known_blocked.add((prev_pos[0] - 3, prev_pos[1]))
+            elif action == "MOVE_UP":
+                known_blocked.add((prev_pos[0], prev_pos[1] - 3))
+            elif action == "MOVE_DOWN":
+                known_blocked.add((prev_pos[0], prev_pos[1] + 3))
+        elif turn.get("moved", False) and "action" in turn and turn["action"].get("action") in ["MOVE_LEFT", "MOVE_RIGHT", "MOVE_UP", "MOVE_DOWN"]:
+            action = turn["action"]["action"]
+            prev_pos = tuple(turn["state"]["player"]["position"])  # Use previous state position
+            if action == "MOVE_RIGHT":
+                known_passable.add((prev_pos[0] + 3, prev_pos[1]))
+            elif action == "MOVE_LEFT":
+                known_passable.add((prev_pos[0] - 3, prev_pos[1]))
+            elif action == "MOVE_UP":
+                known_passable.add((prev_pos[0], prev_pos[1] - 3))
+            elif action == "MOVE_DOWN":
+                known_passable.add((prev_pos[0], prev_pos[1] + 3))
+    blocks = blocks.union(known_blocked)  # Update blocks set with known blocked positions
+    blocks = blocks - known_passable  # Remove positions that were successfully traversed
+
+    if goals:
+        goal_pos = tuple(goals[0]["position"])
+        path = a_star_search(player_pos, goal_pos, walls, blocks)
+        
+        if path:
+            next_step = path[0]
+            move_direction = get_move_direction(player_pos, next_step)
+            if move_direction:
+                return {"action": move_direction}
+    
+    # Strategy to switch to a different piece if stuck
+    if len(history) > 3 and all(not turn["moved"] for turn in history[-3:]) and state["level"]["current"] != 1:
+        selectables = state["objects"]["selectables"]
+        if selectables and state["objects"]["goals"]:  # Ensure selectables and goals exist
+            goal_pos = tuple(state["objects"]["goals"][0]["position"])
+            distances = {}
+            for selectable in selectables:
+                sel_pos = tuple(selectable["position"])
+                if sel_pos != player_pos:
+                    distances[sel_pos] = heuristic(sel_pos, goal_pos)  # Use existing heuristic
+            if distances:  # Only proceed if there are other selectables
+                best_sel_pos = min(distances, key=distances.get)
+                return {"action": "CLICK", "target_position": list(best_sel_pos)}  # Convert tuple back to list
+        # Fallback to original behavior if no suitable selectable is found
+        for selectable in selectables:
+            if tuple(selectable["position"]) != player_pos:
+                return {"action": "CLICK", "target_position": selectable["position"]}
+    
+    # Analyze history for both failures and successes to select the best direction
+    failure_counts = {"MOVE_LEFT": 0, "MOVE_RIGHT": 0, "MOVE_UP": 0, "MOVE_DOWN": 0}
+    success_counts = {"MOVE_LEFT": 0, "MOVE_RIGHT": 0, "MOVE_UP": 0, "MOVE_DOWN": 0}
+    for turn in reversed(history):
+        if "action" in turn and turn["action"].get("action") in failure_counts:
+            action = turn["action"]["action"]
+            if turn.get("moved", False):
+                success_counts[action] += 1
+            else:
+                failure_counts[action] += 1
+    fallback_actions = ["MOVE_RIGHT", "MOVE_DOWN", "MOVE_LEFT", "MOVE_UP"]
+    # Select the action with the highest success count; in case of ties, choose the one with the lowest failure count
+    # Modify to add level-specific bias for Level 1, prioritizing MOVE_LEFT
+    best_action = max(fallback_actions, key=lambda action: (success_counts[action] + (5 if state["level"]["current"] == 1 and action == "MOVE_LEFT" else 0), -failure_counts[action]))
+    return {"action": best_action}

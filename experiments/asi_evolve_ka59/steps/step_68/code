@@ -1,0 +1,139 @@
+import heapq
+from collections import defaultdict
+import math
+
+def agent_step(state, history):
+    def heuristic(a, b):
+        """Calculate Manhattan distance as heuristic."""
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+    
+    def a_star_search(start, goal, walls, blocks, success_penalties, failure_penalties):
+        """Perform A* search with adjustments based on history."""
+        frontier = []
+        heapq.heappush(frontier, (0, start))
+        came_from = {}
+        cost_so_far = {}
+        came_from[start] = None
+        cost_so_far[start] = 0
+        
+        while frontier:
+            _, current = heapq.heappop(frontier)
+            
+            if current == goal:
+                break
+            
+            for dx, dy in [(-3, 0), (3, 0), (0, -3), (0, 3)]:  # Left, Right, Up, Down
+                next_step = (current[0] + dx, current[1] + dy)
+                if next_step in walls or next_step in blocks:
+                    continue
+                new_cost = cost_so_far[current] + 1
+                direction = get_direction_key(dx, dy)
+                if direction in failure_penalties:
+                    new_cost += failure_penalties[direction] * 0.5  # Penalize failed directions
+                if direction in success_penalties:
+                    new_cost -= success_penalties[direction] * 0.2  # Reward successful directions, but cap at 1
+                    if new_cost < 1:
+                        new_cost = 1  # Ensure cost doesn't go negative
+                if next_step not in cost_so_far or new_cost < cost_so_far[next_step]:
+                    cost_so_far[next_step] = new_cost
+                    priority = new_cost + heuristic(goal, next_step)
+                    heapq.heappush(frontier, (priority, next_step))
+                    came_from[next_step] = current
+        
+        if goal not in came_from:
+            return None
+        current = goal
+        path = []
+        while current != start:
+            path.append(current)
+            current = came_from[current]
+        path.reverse()
+        return path
+    
+    def get_direction_key(dx, dy):
+        if dx == 3: return "MOVE_RIGHT"
+        if dx == -3: return "MOVE_LEFT"
+        if dy == 3: return "MOVE_DOWN"
+        if dy == -3: return "MOVE_UP"
+        return None
+    
+    def get_move_direction(from_pos, to_pos):
+        if from_pos[0] < to_pos[0]: return "MOVE_RIGHT"
+        if from_pos[0] > to_pos[0]: return "MOVE_LEFT"
+        if from_pos[1] < to_pos[1]: return "MOVE_DOWN"
+        if from_pos[1] > to_pos[1]: return "MOVE_UP"
+        return None
+    
+    def analyze_history(history):
+        success_counts = defaultdict(int)  # Per direction
+        failure_counts = defaultdict(int)  # Per direction
+        for turn in history:
+            action = turn["action"].get("action")
+            moved = turn["moved"]
+            if action in ["MOVE_RIGHT", "MOVE_LEFT", "MOVE_UP", "MOVE_DOWN"]:
+                if moved:
+                    success_counts[action] += 1
+                else:
+                    failure_counts[action] += 1
+        return success_counts, failure_counts  # Return both for penalties
+    
+    def is_stuck(history):
+        return len(history) >= 3 and not any(turn["moved"] for turn in history[-3:])
+    
+    player_pos = tuple(state["player"]["position"])
+    goals = state["objects"]["goals"]
+    walls = {tuple(wall["position"]) for wall in state["objects"]["walls"]}
+    blocks = {tuple(block["position"]) for block in state["objects"]["blocks"]}
+    
+    # Update blocks with heuristic hints
+    if state["movement"]["right_blocked"]:
+        blocks.add((player_pos[0] + 3, player_pos[1]))
+    if state["movement"]["left_blocked"]:
+        blocks.add((player_pos[0] - 3, player_pos[1]))
+    if state["movement"]["up_blocked"]:
+        blocks.add((player_pos[0], player_pos[1] - 3))
+    if state["movement"]["down_blocked"]:
+        blocks.add((player_pos[0], player_pos[1] + 3))
+    
+    success_penalties, failure_penalties = analyze_history(history)  # Analyze for both successes and failures
+    
+    if goals:
+        goal_pos = tuple(goals[0]["position"])  # Target the first goal
+        path = a_star_search(player_pos, goal_pos, walls, blocks, success_penalties, failure_penalties)
+        
+        if path:
+            next_step = path[0]
+            move_direction = get_move_direction(player_pos, next_step)
+            return {"action": move_direction}
+    
+    # Improved strategic switching: Prioritize based on distance to goals and proximity to blocks
+    if is_stuck(history) or not path:
+        selectables = state["objects"]["selectables"]
+        if selectables:
+            goals_pos = [tuple(goal["position"]) for goal in goals]
+            best_selectable = None
+            best_score = float('inf')
+            for selectable in selectables:
+                sel_pos = tuple(selectable["position"])
+                if sel_pos != player_pos:
+                    # Score based on distance to nearest goal and distance to nearest block
+                    distances_to_goals = [heuristic(sel_pos, g) for g in goals_pos]
+                    nearest_goal_distance = min(distances_to_goals)
+                    distances_to_blocks = [heuristic(sel_pos, tuple(block["position"])) for block in state["objects"]["blocks"]]
+                    nearest_block_distance = min(distances_to_blocks) if distances_to_blocks else float('inf')
+                    score = nearest_goal_distance + (nearest_block_distance * 0.5)  # Weigh goals more
+                    if score < best_score:
+                        best_score = score
+                        best_selectable = selectable
+            if best_selectable:
+                return {"action": "CLICK", "target_position": best_selectable["position"]}
+    
+    # Fallback: Choose direction with the highest success rate
+    directions = ["MOVE_RIGHT", "MOVE_LEFT", "MOVE_UP", "MOVE_DOWN"]
+    if directions:
+        # Select direction with max successes minus failures
+        best_direction = max(directions, key=lambda d: success_penalties.get(d, 0) - failure_penalties.get(d, 0))
+        return {"action": best_direction}
+    
+    # Absolute fallback if nothing else
+    return {"action": "MOVE_RIGHT"}  # Default to right as in baseline

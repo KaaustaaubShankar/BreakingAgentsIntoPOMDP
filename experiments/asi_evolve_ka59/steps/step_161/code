@@ -1,0 +1,146 @@
+import heapq
+from collections import defaultdict
+import math
+
+def agent_step(state, history):
+    def heuristic(a, b):
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+    
+    def a_star_search(start, goal, walls, blocks, direction_weights, max_depth, history):
+        def can_push_block(direction, from_pos, blocks):
+            successes = sum(1 for turn in history if turn["action"].get("action") == direction and turn["moved"])
+            failures = sum(1 for turn in history if turn["action"].get("action") == direction and not turn["moved"])
+            return successes > failures  # Use history to predict push success
+        
+        frontier = []
+        heapq.heappush(frontier, (0, start))
+        came_from = {}
+        cost_so_far = {}
+        came_from[start] = None
+        cost_so_far[start] = 0
+        
+        while frontier:
+            current_cost, current = heapq.heappop(frontier)
+            
+            if current == goal or len(reconstruct_path(came_from, start, current)) >= max_depth:
+                break
+            
+            for dx, dy in [(-3, 0), (3, 0), (0, -3), (0, 3)]:  # Left, Right, Up, Down
+                next_step = (current[0] + dx, current[1] + dy)
+                if next_step in walls:
+                    continue  # Wall blocks
+                if next_step in blocks:
+                    block_next = (next_step[0] + dx, next_step[1] + dy)
+                    if block_next not in walls and block_next not in blocks and can_push_block(get_direction_key(dx, dy), current, blocks):
+                        # Simulate successful push
+                        new_cost = cost_so_far[current] + (1 * direction_weights.get(get_direction_key(dx, dy), 1))
+                        if next_step not in cost_so_far or new_cost < cost_so_far[next_step]:
+                            cost_so_far[next_step] = new_cost
+                            priority = new_cost + heuristic(goal, next_step)
+                            heapq.heappush(frontier, (priority, next_step))
+                            came_from[next_step] = current
+                    continue  # Skip if can't push
+                direction_key = get_direction_key(dx, dy)
+                new_cost = cost_so_far[current] + (1 * direction_weights.get(direction_key, 1))
+                if next_step not in cost_so_far or new_cost < cost_so_far[next_step]:
+                    cost_so_far[next_step] = new_cost
+                    priority = new_cost + heuristic(goal, next_step)
+                    heapq.heappush(frontier, (priority, next_step))
+                    came_from[next_step] = current
+        
+        return reconstruct_path(came_from, start, goal)
+    
+    def reconstruct_path(came_from, start, goal):
+        current = goal
+        path = []
+        while current != start and current in came_from:
+            path.append(current)
+            current = came_from.get(current)
+        path.reverse()
+        return path if path else None
+    
+    def get_direction_key(dx, dy):
+        if dx == 3: return "MOVE_RIGHT"
+        if dx == -3: return "MOVE_LEFT"
+        if dy == 3: return "MOVE_DOWN"
+        if dy == -3: return "MOVE_UP"
+        return None
+    
+    def analyze_history(history):
+        direction_success = defaultdict(int)
+        direction_attempts = defaultdict(int)
+        for turn in history:
+            action = turn["action"].get("action")
+            if action in ["MOVE_LEFT", "MOVE_RIGHT", "MOVE_UP", "MOVE_DOWN"]:
+                direction_attempts[action] += 1
+                if turn["moved"]:
+                    direction_success[action] += 1
+        direction_weights = {}
+        for direction in ["MOVE_LEFT", "MOVE_RIGHT", "MOVE_UP", "MOVE_DOWN"]:
+            if direction_attempts[direction] > 0:
+                success_rate = direction_success[direction] / direction_attempts[direction]
+                direction_weights[direction] = 1 / (success_rate + 0.01)  # Penalize low success
+            else:
+                direction_weights[direction] = 1
+        return direction_weights
+    
+    def is_stuck(history):
+        return len(history) >= 3 and not any(turn["moved"] for turn in history[-3:])
+    
+    def simulate_move(history, direction):
+        successes = sum(1 for turn in history if turn["action"].get("action") == direction and turn["moved"])
+        failures = sum(1 for turn in history if turn["action"].get("action") == direction and not turn["moved"])
+        return successes > failures  # Predict based on history
+    
+    player_pos = tuple(state["player"]["position"])
+    goals = state["objects"]["goals"]
+    walls = {tuple(wall["position"]) for wall in state["objects"]["walls"]}
+    blocks = {tuple(block["position"]) for block in state["objects"]["blocks"]}
+    
+    # Update blocks with heuristic hints
+    if state["movement"]["right_blocked"]:
+        blocks.add((player_pos[0] + 3, player_pos[1]))
+    if state["movement"]["left_blocked"]:
+        blocks.add((player_pos[0] - 3, player_pos[1]))
+    if state["movement"]["up_blocked"]:
+        blocks.add((player_pos[0], player_pos[1] - 3))
+    if state["movement"]["down_blocked"]:
+        blocks.add((player_pos[0], player_pos[1] + 3))
+    
+    direction_weights = analyze_history(history)
+    max_depth = min(state["resources"]["steps_remaining"], 20)  # Limit based on budget
+    
+    if goals and len(goals) > 0 and state["resources"]["steps_remaining"] > 0:
+        goal_pos = tuple(goals[0]["position"])
+        path = a_star_search(player_pos, goal_pos, walls, blocks, direction_weights, max_depth, history)
+        
+        if path:
+            next_step = path[0]
+            move_direction = get_direction_key(next_step[0] - player_pos[0], next_step[1] - player_pos[1])
+            if move_direction and simulate_move(history, move_direction):
+                return {"action": move_direction}
+    
+    if is_stuck(history) or not path:
+        selectables = state["objects"]["selectables"]
+        if selectables and goals:
+            goal_pos = tuple(goals[0]["position"])
+            best_selectable = None
+            best_cost = float('inf')
+            for selectable in selectables:
+                sel_pos = tuple(selectable["position"])
+                if sel_pos != player_pos:
+                    sel_path = a_star_search(sel_pos, goal_pos, walls, blocks, direction_weights, max_depth, history)
+                    if sel_path and simulate_move(history, get_direction_key(sel_path[0][0] - sel_pos[0], sel_path[0][1] - sel_pos[1])):
+                        cost = len(sel_path)
+                        if cost < best_cost:
+                            best_cost = cost
+                            best_selectable = selectable
+            if best_selectable:
+                return {"action": "CLICK", "target_position": best_selectable["position"]}
+    
+    possible_actions = ["MOVE_RIGHT", "MOVE_DOWN", "MOVE_LEFT", "MOVE_UP"]
+    for action in sorted(possible_actions, key=lambda d: direction_weights.get(d, 1)):
+        if simulate_move(history, action) and not state["movement"].get(action.lower().replace("move_", "") + "_blocked", False):
+            return {"action": action}
+    step = len(history)
+    return {"action": possible_actions[step % len(possible_actions)]}

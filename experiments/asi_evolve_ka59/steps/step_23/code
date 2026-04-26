@@ -1,0 +1,125 @@
+import heapq
+import math
+
+def agent_step(state, history):
+    def heuristic(a, b):
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])  # Manhattan distance
+    
+    def a_star_search(start, goal, walls, blocks, heuristic_hints):
+        def is_passable(position):
+            # Check if position is not a wall or block, and consider heuristic hints
+            if position in walls or position in blocks:
+                return False
+            # Adjust for heuristic hints: treat hinted blocked areas as temporary blocks
+            x, y = position
+            if heuristic_hints.get("right_blocked") and (x + 3, y) == position:
+                return False
+            if heuristic_hints.get("left_blocked") and (x - 3, y) == position:
+                return False
+            if heuristic_hints.get("up_blocked") and (x, y - 3) == position:
+                return False
+            if heuristic_hints.get("down_blocked") and (x, y + 3) == position:
+                return False
+            return True
+        
+        frontier = []
+        heapq.heappush(frontier, (0, start))
+        came_from = {}
+        cost_so_far = {}
+        came_from[start] = None
+        cost_so_far[start] = 0
+        
+        while frontier:
+            current_cost, current = heapq.heappop(frontier)
+            
+            if current == goal:
+                break
+            
+            for dx, dy in [(-3, 0), (3, 0), (0, -3), (0, 3)]:  # Moves in pixel steps
+                next_step = (current[0] + dx, current[1] + dy)
+                if is_passable(next_step):
+                    new_cost = cost_so_far[current] + 1
+                    if next_step not in cost_so_far or new_cost < cost_so_far[next_step]:
+                        cost_so_far[next_step] = new_cost
+                        priority = new_cost + heuristic(goal, next_step)
+                        heapq.heappush(frontier, (priority, next_step))
+                        came_from[next_step] = current
+        
+        if goal not in came_from:
+            return None  # No path found
+        
+        # Reconstruct path
+        current = goal
+        path = []
+        while current != start:
+            path.append(current)
+            current = came_from[current]
+        path.reverse()
+        return path
+
+    def get_move_direction(from_pos, to_pos):
+        if from_pos[0] < to_pos[0]:
+            return "MOVE_RIGHT"
+        elif from_pos[0] > to_pos[0]:
+            return "MOVE_LEFT"
+        elif from_pos[1] < to_pos[1]:
+            return "MOVE_DOWN"
+        elif from_pos[1] > to_pos[1]:
+            return "MOVE_UP"
+        return None
+
+    def get_best_selectable(selectables, goals):
+        if not goals or not selectables:
+            return None
+        goal_pos = tuple(goals[0]["position"])  # Target nearest goal
+        best_selectable = min(selectables, key=lambda s: heuristic(tuple(s["position"]), goal_pos), default=None)
+        return best_selectable
+
+    # Analyze history for learning
+    failure_counts = {"MOVE_RIGHT": 0, "MOVE_LEFT": 0, "MOVE_DOWN": 0, "MOVE_UP": 0}
+    success_counts = {"MOVE_RIGHT": 0, "MOVE_LEFT": 0, "MOVE_DOWN": 0, "MOVE_UP": 0}
+    for entry in history[-10:]:  # Last 10 turns
+        action = entry.get("action", {}).get("action")
+        moved = entry.get("moved", False)
+        if action in failure_counts:
+            if not moved:
+                failure_counts[action] += 1
+            else:
+                success_counts[action] += 1
+
+    player_pos = tuple(state["player"]["position"])
+    goals = state["objects"]["goals"]
+    walls = {tuple(wall["position"]) for wall in state["objects"]["walls"]}
+    blocks = {tuple(block["position"]) for block in state["objects"]["blocks"]}
+    heuristic_hints = state["movement"]  # Use directly for dynamic blocking
+
+    if goals:
+        goal_pos = tuple(goals[0]["position"])
+        path = a_star_search(player_pos, goal_pos, walls, blocks, heuristic_hints)
+        
+        if path:
+            next_step = path[0]
+            move_direction = get_move_direction(player_pos, next_step)
+            # Bias towards directions with more successes
+            if move_direction:
+                if success_counts.get(move_direction, 0) > failure_counts.get(move_direction, 0):
+                    return {"action": move_direction}
+                # Still take it if it's the path, but check alternatives
+            return {"action": move_direction}
+    
+    # If no path or stuck, check history for stuck situation
+    if len(history) >= 3 and all(not turn["moved"] for turn in history[-3:]):
+        selectables = state["objects"]["selectables"]
+        best_selectable = get_best_selectable(selectables, goals)
+        if best_selectable and tuple(best_selectable["position"]) != player_pos:
+            return {"action": "CLICK", "target_position": best_selectable["position"]}
+    
+    # Fallback: Choose action with highest success count, avoiding high failures
+    possible_actions = ["MOVE_RIGHT", "MOVE_DOWN", "MOVE_LEFT", "MOVE_UP"]
+    sorted_actions = sorted(possible_actions, key=lambda a: (success_counts.get(a, 0) - failure_counts.get(a, 0)), reverse=True)
+    for action in sorted_actions:
+        if not heuristic_hints.get(action.lower().replace("move_", "") + "_blocked", False):
+            return {"action": action}
+    
+    # Absolute fallback
+    return {"action": "MOVE_RIGHT"}

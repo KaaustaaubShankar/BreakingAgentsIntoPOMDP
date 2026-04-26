@@ -1,0 +1,147 @@
+import heapq
+
+def agent_step(state, history):
+    def heuristic(a, b):
+        """Calculate Manhattan distance as heuristic."""
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+    def a_star_search(start, goal, walls, blocks):
+        """Perform A* search for pathfinding, considering walls and blocks as obstacles."""
+        frontier = []
+        heapq.heappush(frontier, (0, start))
+        came_from = {}
+        cost_so_far = {}
+        came_from[start] = None
+        cost_so_far[start] = 0
+
+        while frontier:
+            _, current = heapq.heappop(frontier)
+
+            if current == goal:
+                break
+
+            for dx, dy in [(-3, 0), (3, 0), (0, -3), (0, 3)]:  # Pixel steps
+                next_step = (current[0] + dx, current[1] + dy)
+                if next_step in walls or next_step in blocks:
+                    continue  # Skip if wall or block
+                new_cost = cost_so_far[current] + 1
+                if next_step not in cost_so_far or new_cost < cost_so_far[next_step]:
+                    cost_so_far[next_step] = new_cost
+                    priority = new_cost + heuristic(goal, next_step)
+                    heapq.heappush(frontier, (priority, next_step))
+                    came_from[next_step] = current
+
+        # Reconstruct path
+        if goal not in came_from:  # No path found
+            return None
+        current = goal
+        path = []
+        while current != start:
+            path.append(current)
+            current = came_from[current]
+        path.reverse()
+        return path
+
+    def get_move_direction(from_pos, to_pos):
+        """Get move direction based on positions."""
+        if from_pos[0] < to_pos[0]:
+            return "MOVE_RIGHT"
+        elif from_pos[0] > to_pos[0]:
+            return "MOVE_LEFT"
+        elif from_pos[1] < to_pos[1]:
+            return "MOVE_DOWN"
+        elif from_pos[1] > to_pos[1]:
+            return "MOVE_UP"
+        return None
+
+    def is_stuck(history):
+        """Enhanced stuck detection: Check for 3+ consecutive no-moves or high failures in directions."""
+        if len(history) >= 3 and not any(turn["moved"] for turn in history[-3:]):
+            return True
+        failed_directions = get_failed_directions(history)
+        if any(count >= 5 for count in failed_directions.values()):  # If any direction failed 5+ times
+            return True
+        return False
+
+    def get_failed_directions(history):
+        """Count failed moves per direction from history."""
+        failed = {"MOVE_RIGHT": 0, "MOVE_LEFT": 0, "MOVE_UP": 0, "MOVE_DOWN": 0}
+        for turn in history:
+            if not turn.get("moved", False) and "action" in turn and turn["action"].get("action", "").startswith("MOVE_"):
+                direction = turn["action"]["action"]
+                if direction in failed:
+                    failed[direction] += 1
+        return failed
+
+    def update_obstacles_with_hints(state, blocks):
+        """Update obstacles using heuristic hints."""
+        player_pos = tuple(state["player"]["position"])
+        if state["movement"].get("right_blocked", False):
+            blocks.add((player_pos[0] + 3, player_pos[1]))
+        if state["movement"].get("left_blocked", False):
+            blocks.add((player_pos[0] - 3, player_pos[1]))
+        if state["movement"].get("up_blocked", False):
+            blocks.add((player_pos[0], player_pos[1] - 3))
+        if state["movement"].get("down_blocked", False):
+            blocks.add((player_pos[0], player_pos[1] + 3))
+        return blocks
+
+    player_pos = tuple(state["player"]["position"])
+    goals = state["objects"]["goals"]
+    walls = {tuple(wall["position"]) for wall in state["objects"]["walls"]}
+    blocks = {tuple(block["position"]) for block in state["objects"]["blocks"]}  # Start with actual blocks
+    blocks = update_obstacles_with_hints(state, blocks)  # Add hinted obstacles
+
+    if is_stuck(history) or state["resources"]["steps_remaining"] < 10:
+        # Strategically switch to the selectable closest to any goal
+        selectables = state["objects"]["selectables"]
+        if selectables:
+            goals_pos = [tuple(goal["position"]) for goal in goals]
+            distances = {}
+            for selectable in selectables:
+                sel_pos = tuple(selectable["position"])
+                if sel_pos != player_pos:
+                    min_dist = min(heuristic(sel_pos, goal) for goal in goals_pos) if goals_pos else float('inf')
+                    distances[sel_pos] = min_dist
+            if distances:
+                best_sel = min(distances, key=distances.get)  # Closest to any goal
+                return {"action": "CLICK", "target_position": list(best_sel)}
+
+    if goals:
+        if goals:
+        nearest_goal = min(goals, key=lambda g: heuristic(player_pos, tuple(g["position"])))
+        goal_pos = tuple(nearest_goal["position"])
+        path = a_star_search(player_pos, goal_pos, walls, blocks)
+        
+        if path:
+            next_step = path[0]
+            move_direction = get_move_direction(player_pos, next_step)
+            if move_direction:
+                failed_directions = get_failed_directions(history)
+                # Bias towards less failed directions if multiple options, but proceed with calculated
+                return {"action": move_direction}
+        
+        # If no path, try the least failed direction
+        failed_directions = get_failed_directions(history)
+        # Bias towards the direction with the fewest failures, but ensure it's still valid
+        least_failed_dir = min(failed_directions, key=failed_directions.get)
+        # Add a check to avoid directions that have failed repeatedly
+        if failed_directions[least_failed_dir] < 5:  # Only use if failures are low
+            return {"action": least_failed_dir}
+        else:
+            # Fallback to a random non-failed direction
+            available_dirs = [dir for dir in failed_directions if failed_directions[dir] < 5]
+            if available_dirs:
+                return {"action": available_dirs[0]}  # Pick the first available
+            else:
+                return {"action": "MOVE_RIGHT"}  # Last resort
+
+    # Fallback: Cycle through moves, but skip highly failed ones
+    cycle = ["MOVE_RIGHT", "MOVE_DOWN", "MOVE_LEFT", "MOVE_UP"]
+    failed_directions = get_failed_directions(history)
+    available_cycle = [dir for dir in cycle if failed_directions[dir] < 5]  # Skip if failed 5+ times
+    if available_cycle:
+        step = len(history) % len(available_cycle)
+        return {"action": available_cycle[step]}
+    else:
+        return {"action": cycle[len(history) % len(cycle)]}  # Fallback if all are failed

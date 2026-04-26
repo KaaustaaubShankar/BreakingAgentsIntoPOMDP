@@ -1,0 +1,136 @@
+import heapq
+import collections
+from collections import defaultdict
+
+def agent_step(state, history):
+    def heuristic(a, b):
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])  # Manhattan distance
+    
+    def parse_semantic_grid(semantic_grid):
+        grid_rows = semantic_grid.split('\n')
+        obstacles = set()  # Store pixel positions of obstacles
+        for grid_y, row in enumerate(grid_rows):
+            for grid_x, cell in enumerate(row):
+                if cell in ['#', 'B']:  # Walls or blocks
+                    pixel_x = grid_x * 3  # Convert grid to pixel
+                    pixel_y = grid_y * 3
+                    obstacles.add((pixel_x, pixel_y))
+        return obstacles
+    
+    def a_star_search(start, goal, obstacles, steps_remaining):
+        if steps_remaining <= 10:  # Limit search depth based on remaining steps
+            max_depth = steps_remaining
+        else:
+            max_depth = 20  # Reasonable default to avoid timeouts
+        
+        frontier = []
+        heapq.heappush(frontier, (0, start))
+        came_from = {}
+        cost_so_far = {}
+        came_from[start] = None
+        cost_so_far[start] = 0
+        
+        while frontier:
+            current_cost, current = heapq.heappop(frontier)
+            if len(path_from_start(current, came_from)) > max_depth:  # Check depth
+                continue  # Skip if path exceeds depth limit
+            if current == goal:
+                break
+            for dx, dy in [(-3, 0), (3, 0), (0, -3), (0, 3)]:
+                next_step = (current[0] + dx, current[1] + dy)
+                if next_step not in obstacles:
+                    new_cost = cost_so_far[current] + 1
+                    if next_step not in cost_so_far or new_cost < cost_so_far[next_step]:
+                        cost_so_far[next_step] = new_cost
+                        priority = new_cost + heuristic(goal, next_step)
+                        heapq.heappush(frontier, (priority, next_step))
+                        came_from[next_step] = current
+        if goal not in came_from:
+            return None
+        path = []
+        current = goal
+        while current != start:
+            path.append(current)
+            current = came_from[current]
+        path.reverse()
+        return path  # Returns the path as a list of positions
+    
+    def path_from_start(position, came_from):
+        path = []
+        current = position
+        while current in came_from:
+            path.append(current)
+            current = came_from[current]
+        return path  # For depth checking
+    
+    def get_move_direction(from_pos, to_pos):
+        if from_pos[0] < to_pos[0]:
+            return "MOVE_RIGHT"
+        elif from_pos[0] > to_pos[0]:
+            return "MOVE_LEFT"
+        elif from_pos[1] < to_pos[1]:
+            return "MOVE_DOWN"
+        elif from_pos[1] > to_pos[1]:
+            return "MOVE_UP"
+        return None
+    
+    def analyze_history(history):
+        failure_counts = defaultdict(int)
+        success_counts = defaultdict(int)
+        for entry in history[-10:]:  # Last 10 turns
+            action = entry.get("action", {}).get("action")
+            moved = entry.get("moved", False)
+            if action in ["MOVE_RIGHT", "MOVE_LEFT", "MOVE_UP", "MOVE_DOWN"]:
+                if not moved:
+                    failure_counts[action] += 1  # Weight failures more if repeated
+                else:
+                    success_counts[action] += 1
+        return success_counts, failure_counts  # Return weighted counts
+    
+    def get_best_selectable(selectables, goals, history):
+        if not goals or not selectables:
+            return None
+        success_counts, _ = analyze_history(history)  # Use history for weighting
+        def score_selectable(selectable):
+            pos = tuple(selectable["position"])
+            dist_to_goal = min(heuristic(pos, tuple(g["position"])) for g in goals)
+            success_score = sum(success_counts.get(get_move_direction(pos, tuple(g["position"])), 0) for g in goals)  # Historical success toward goals
+            return dist_to_goal - success_score  # Lower score is better
+        return min(selectables, key=score_selectable, default=None)
+    
+    player_pos = tuple(state["player"]["position"])
+    goals = state["objects"]["goals"]
+    walls_blocks = {tuple(wall["position"]) for wall in state["objects"]["walls"]} | {tuple(block["position"]) for block in state["objects"]["blocks"]}
+    semantic_obstacles = parse_semantic_grid(state["semantic_grid"])  # Integrate semantic grid
+    obstacles = walls_blocks.union(semantic_obstacles)  # Combined obstacles
+    
+    success_counts, failure_counts = analyze_history(history)
+    
+    if goals and state["resources"]["steps_remaining"] > 0:
+        nearest_goal = min(goals, key=lambda g: heuristic(player_pos, tuple(g["position"])))
+        goal_pos = tuple(nearest_goal["position"])
+        path = a_star_search(player_pos, goal_pos, obstacles, state["resources"]["steps_remaining"])
+        
+        if path:
+            next_step = path[0]
+            move_direction = get_move_direction(player_pos, next_step)
+            if move_direction and success_counts.get(move_direction, 0) > failure_counts.get(move_direction, 0):  # Bias toward successful directions
+                return {"action": move_direction}
+            return {"action": move_direction}  # Still return if no bias conflict
+        
+    # Check if stuck: No movement in last 3 turns or repeated failures
+    if len(history) >= 3 and all(not turn["moved"] for turn in history[-3:]) or any(count >= 5 for count in failure_counts.values()):
+        selectables = state["objects"]["selectables"]
+        best_selectable = get_best_selectable([s for s in selectables if tuple(s["position"]) != player_pos], goals, history)
+        if best_selectable:
+            return {"action": "CLICK", "target_position": best_selectable["position"]}
+    
+    # Fallback: Choose best direction based on success minus failures
+    possible_actions = ["MOVE_RIGHT", "MOVE_DOWN", "MOVE_LEFT", "MOVE_UP"]
+    scored_actions = {action: success_counts.get(action, 0) - failure_counts.get(action, 0) for action in possible_actions}
+    if any(scored_actions.values()):  # If any positive scores
+        best_action = max(scored_actions, key=scored_actions.get)
+        return {"action": best_action}
+    
+    # Last resort
+    return {"action": "MOVE_RIGHT"}

@@ -1,0 +1,158 @@
+import heapq
+from collections import defaultdict
+
+def agent_step(state, history):
+    def heuristic(a, b):
+        """Calculate Manhattan distance as heuristic."""
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+    def a_star_search(start, goal, walls, blocks, preferred_directions):
+        """Perform A* search for pathfinding, with preference for certain directions."""
+        frontier = []
+        heapq.heappush(frontier, (0, start))
+        came_from = {}
+        cost_so_far = {}
+        came_from[start] = None
+        cost_so_far[start] = 0
+        
+        while frontier:
+            _, current = heapq.heappop(frontier)
+            
+            if current == goal:
+                break
+            
+            neighbors = [(-3, 0), (3, 0), (0, -3), (0, 3)]  # Left, Right, Up, Down
+            # Shuffle neighbors to prefer directions with higher success rates
+            preferred = [dir for dir in neighbors if dir in preferred_directions]
+            non_preferred = [dir for dir in neighbors if dir not in preferred_directions]
+            shuffled_neighbors = preferred + non_preferred  # Prioritize preferred
+            
+            for dx, dy in shuffled_neighbors:
+                next_step = (current[0] + dx, current[1] + dy)
+                if next_step in walls or next_step in blocks:
+                    continue
+                new_cost = cost_so_far[current] + 1  # Add a small penalty if not preferred
+                if (dx, dy) not in preferred_directions:
+                    new_cost += 0.5  # Slight penalty for non-preferred directions
+                if next_step not in cost_so_far or new_cost < cost_so_far[next_step]:
+                    cost_so_far[next_step] = new_cost
+                    priority = new_cost + heuristic(goal, next_step)
+                    heapq.heappush(frontier, (priority, next_step))
+                    came_from[next_step] = current
+        
+        # Reconstruct path
+        current = goal
+        path = []
+        while current != start:
+            if current is None:
+                return None
+            path.append(current)
+            current = came_from.get(current)
+        path.reverse()
+        return path
+
+    def get_move_direction(from_pos, to_pos):
+        """Get move direction based on positions."""
+        if from_pos[0] < to_pos[0]:
+            return "MOVE_RIGHT"
+        elif from_pos[0] > to_pos[0]:
+            return "MOVE_LEFT"
+        elif from_pos[1] < to_pos[1]:
+            return "MOVE_DOWN"
+        elif from_pos[1] > to_pos[1]:
+            return "MOVE_UP"
+        return None
+
+    def analyze_history(history):
+        """Analyze history to track successes and failures per direction."""
+        direction_success = defaultdict(int)  # e.g., ("MOVE_RIGHT", successes)
+        direction_failures = defaultdict(int)  # e.g., ("MOVE_RIGHT", failures)
+        
+        for turn in history:
+            action = turn["action"].get("action")
+            moved = turn["moved"]
+            if action in ["MOVE_LEFT", "MOVE_RIGHT", "MOVE_UP", "MOVE_DOWN"]:
+                if moved:
+                    direction_success[action] += 1
+                else:
+                    direction_failures[action] += 1
+        
+        # Determine preferred directions based on success rate
+        preferred_directions = {}  # Map to (dx, dy) tuples
+        for direction in ["MOVE_RIGHT", "MOVE_LEFT", "MOVE_UP", "MOVE_DOWN"]:
+            successes = direction_success[direction]
+            failures = direction_failures[direction]
+            if successes + failures > 0 and successes > failures:  # Only prefer if more successes
+                if direction == "MOVE_RIGHT":
+                    preferred_directions[(3, 0)] = True
+                elif direction == "MOVE_LEFT":
+                    preferred_directions[(-3, 0)] = True
+                elif direction == "MOVE_DOWN":
+                    preferred_directions[(0, 3)] = True
+                elif direction == "MOVE_UP":
+                    preferred_directions[(0, -3)] = True
+        return preferred_directions  # Returns a dict of preferred (dx, dy)
+
+    def is_stuck(history):
+        """Check if the agent is stuck."""
+        if len(history) >= 3 and not any(turn["moved"] for turn in history[-3:]):
+            return True
+        return False
+
+    player_pos = tuple(state["player"]["position"])
+    goals = state["objects"]["goals"]
+    walls = {tuple(wall["position"]) for wall in state["objects"]["walls"]}
+    blocks = {tuple(block["position"]) for block in state["objects"]["blocks"]}
+    
+    # Consider dynamic obstacles based on movement hints and history
+    if state["movement"]["right_blocked"]:
+        blocks.add((player_pos[0] + 3, player_pos[1]))
+    if state["movement"]["left_blocked"]:
+        blocks.add((player_pos[0] - 3, player_pos[1]))
+    if state["movement"]["up_blocked"]:
+        blocks.add((player_pos[0], player_pos[1] - 3))
+    if state["movement"]["down_blocked"]:
+        blocks.add((player_pos[0], player_pos[1] + 3))
+    
+    # Add historically blocked positions from history
+    known_blocked = set()
+    for turn in reversed(history):
+        if not turn.get("moved", False) and "action" in turn and turn["action"].get("action") in ["MOVE_LEFT", "MOVE_RIGHT", "MOVE_UP", "MOVE_DOWN"]:
+            action = turn["action"]["action"]
+            prev_pos = tuple(turn["state"]["player"]["position"])
+            if action == "MOVE_RIGHT":
+                known_blocked.add((prev_pos[0] + 3, prev_pos[1]))
+            elif action == "MOVE_LEFT":
+                known_blocked.add((prev_pos[0] - 3, prev_pos[1]))
+            elif action == "MOVE_UP":
+                known_blocked.add((prev_pos[0], prev_pos[1] - 3))
+            elif action == "MOVE_DOWN":
+                known_blocked.add((prev_pos[0], prev_pos[1] + 3))
+    blocks = blocks.union(known_blocked)
+    
+    preferred_directions = analyze_history(history)  # Get preferred directions from history
+    
+    if goals and len(goals) > 0:
+        goal_pos = tuple(goals[0]["position"])  # Target the first goal
+        path = a_star_search(player_pos, goal_pos, walls, blocks, preferred_directions)
+        
+        if path:
+            next_step = path[0]
+            move_direction = get_move_direction(player_pos, next_step)
+            if move_direction:
+                return {"action": move_direction}
+    
+    # If stuck or no path, try switching to another selectable
+    if is_stuck(history) or not path:
+        selectables = state["objects"]["selectables"]
+        for selectable in selectables:
+            if tuple(selectable["position"]) != player_pos:
+                return {"action": "CLICK", "target_position": selectable["position"]}
+    
+    # Fallback to a cycle, but bias towards directions with more successes
+    cycle = ["MOVE_RIGHT", "MOVE_DOWN", "MOVE_LEFT", "MOVE_UP"]
+    # Sort cycle based on success rates
+    # Sort cycle based on success rates and add a tie-breaker using failure counts
+    sorted_cycle = sorted(cycle, key=lambda d: (direction_success.get(d, 0), -direction_failures.get(d, 0)), reverse=True)
+    step = len(history)
+    return {"action": sorted_cycle[step % len(sorted_cycle)]}

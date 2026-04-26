@@ -1,0 +1,134 @@
+import heapq
+from collections import defaultdict
+import math
+
+def agent_step(state, history):
+    STEP = 3  # Pixels per cell
+    
+    def parse_semantic_grid(grid_str):
+        lines = grid_str.strip().split('\n')
+        grid = [list(line) for line in lines if line.strip()]
+        obstacles = set()
+        for y, row in enumerate(grid):
+            for x, cell in enumerate(row):
+                if cell in ['#', 'B']:  # Walls and blocks
+                    pixel_x = x * STEP
+                    pixel_y = y * STEP
+                    obstacles.add((pixel_x, pixel_y))
+        return obstacles
+    
+    def heuristic(a, b):
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+    
+    def a_star_search(start, goal, walls, blocks, known_obstacles, success_weights):
+        effective_obstacles = walls.union(blocks).union(known_obstacles)
+        frontier = []
+        heapq.heappush(frontier, (0, start))
+        came_from = {}
+        cost_so_far = {}
+        came_from[start] = None
+        cost_so_far[start] = 0
+        
+        while frontier:
+            _, current = heapq.heappop(frontier)
+            
+            if current == goal:
+                break
+            
+            for dx, dy in [(-STEP, 0), (STEP, 0), (0, -STEP), (0, STEP)]:
+                next_step = (current[0] + dx, current[1] + dy)
+                if next_step in effective_obstacles:
+                    continue
+                new_cost = cost_so_far[current] + (1 / (success_weights.get(next_step, 1) + 1))  # Weight by success
+                if next_step not in cost_so_far or new_cost < cost_so_far[next_step]:
+                    cost_so_far[next_step] = new_cost
+                    priority = new_cost + heuristic(goal, next_step)
+                    heapq.heappush(frontier, (priority, next_step))
+                    came_from[next_step] = current
+        
+        if goal not in came_from:
+            return None
+        current = goal
+        path = []
+        while current != start:
+            path.append(current)
+            current = came_from[current]
+        path.reverse()
+        return path
+    
+    def get_move_direction(from_pos, to_pos):
+        if from_pos[0] < to_pos[0]:
+            return "MOVE_RIGHT"
+        elif from_pos[0] > to_pos[0]:
+            return "MOVE_LEFT"
+        elif from_pos[1] < to_pos[1]:
+            return "MOVE_DOWN"
+        elif from_pos[1] > to_pos[1]:
+            return "MOVE_UP"
+        return None
+    
+    def evaluate_selectable(sel_pos, goal_pos, state, history):
+        dist_to_goal = heuristic(sel_pos, goal_pos)
+        past_success = sum(1 for turn in history if turn["action"].get("target_position") == list(sel_pos) and turn["moved"])
+        nearby_blocks = sum(1 for block in state["objects"]["blocks"] if heuristic(sel_pos, tuple(block["position"])) <= STEP * 2)
+        return dist_to_goal - past_success + (nearby_blocks * 2)  # Prioritize near blocks
+    
+    player_pos = tuple(state["player"]["position"])
+    goals = state["objects"]["goals"]
+    walls = parse_semantic_grid(state["semantic_grid"]).union({tuple(wall["position"]) for wall in state["objects"]["walls"]})
+    blocks = {tuple(block["position"]) for block in state["objects"]["blocks"]}
+    
+    success_counts = defaultdict(int)
+    failure_counts = defaultdict(int)
+    known_obstacles = set()
+    stuck_count = 0
+    
+    for turn in history:
+        if not turn["moved"] and turn["action"]["action"] in ["MOVE_RIGHT", "MOVE_LEFT", "MOVE_UP", "MOVE_DOWN"]:
+            action = turn["action"]["action"]
+            failure_counts[action] += 1
+            prev_pos = tuple(turn["state"]["player"]["position"])
+            if action == "MOVE_RIGHT":
+                known_obstacles.add((prev_pos[0] + STEP, prev_pos[1]))
+            elif action == "MOVE_LEFT":
+                known_obstacles.add((prev_pos[0] - STEP, prev_pos[1]))
+            elif action == "MOVE_UP":
+                known_obstacles.add((prev_pos[0], prev_pos[1] - STEP))
+            elif action == "MOVE_DOWN":
+                known_obstacles.add((prev_pos[0], prev_pos[1] + STEP))
+            stuck_count += 1
+        elif turn["moved"]:
+            action = turn["action"]["action"]
+            success_counts[action] += 1
+            stuck_count = 0
+    
+    success_weights = {pos: count for turn in history if turn["moved"] for pos in [tuple(turn["state"]["player"]["position"])] if count := success_counts.get(turn["action"]["action"]) > 0}
+    
+    if goals and state["resources"]["steps_remaining"] > 0:
+        goal_pos = tuple(goals[0]["position"])
+        path = a_star_search(player_pos, goal_pos, walls, blocks, known_obstacles, success_weights)
+        
+        if path:
+            next_step = path[0]
+            move_direction = get_move_direction(player_pos, next_step)
+            if success_counts[move_direction] > failure_counts[move_direction]:
+                return {"action": move_direction}
+        
+        if stuck_count >= 2 or len(history) < 5:
+            directions = ["MOVE_RIGHT", "MOVE_LEFT", "MOVE_UP", "MOVE_DOWN"]
+            least_failure_dir = min(directions, key=lambda d: failure_counts[d])
+            return {"action": least_failure_dir}
+        
+        if stuck_count >= 3 and state["level"]["current"] != 1:
+            selectables = state["objects"]["selectables"]
+            if selectables:
+                best_selectable = min([s for s in selectables if tuple(s["position"]) != player_pos], key=lambda s: evaluate_selectable(tuple(s["position"]), goal_pos, state, history))
+                return {"action": "CLICK", "target_position": best_selectable["position"]}
+    
+    directions = ["MOVE_RIGHT", "MOVE_LEFT", "MOVE_UP", "MOVE_DOWN"]
+    valid_directions = [d for d in directions if success_counts[d] > failure_counts[d]]
+    if valid_directions:
+        return {"action": max(valid_directions, key=lambda d: success_counts[d] - failure_counts[d])}
+    
+    cycle = ["MOVE_LEFT", "MOVE_DOWN", "MOVE_RIGHT", "MOVE_UP"] if state["level"]["current"] == 1 else ["MOVE_RIGHT", "MOVE_DOWN", "MOVE_LEFT", "MOVE_UP"]
+    return {"action": cycle[len(history) % len(cycle)]}

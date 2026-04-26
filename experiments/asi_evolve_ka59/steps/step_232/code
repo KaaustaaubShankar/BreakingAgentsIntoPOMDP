@@ -1,0 +1,142 @@
+import heapq
+from collections import defaultdict
+import math
+
+def agent_step(state, history):
+    STEP = 3  # Pixels per cell
+    
+    def heuristic(a, b):
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+    
+    def a_star_search(start, goal, static_obstacles, dynamic_obstacles, direction_success_rates, history):
+        def can_push_block(direction, from_pos, to_pos):
+            successes = sum(1 for turn in history if turn["action"].get("action") == direction and turn["moved"])
+            failures = sum(1 for turn in history if turn["action"].get("action") == direction and not turn["moved"])
+            return successes > failures  # Heuristic based on history
+        
+        effective_obstacles = static_obstacles.union(dynamic_obstacles)
+        frontier = []
+        heapq.heappush(frontier, (0, start))
+        came_from = {}
+        cost_so_far = {}
+        came_from[start] = None
+        cost_so_far[start] = 0
+        
+        while frontier:
+            _, current = heapq.heappop(frontier)
+            
+            if current == goal:
+                break
+            
+            for dx, dy in [(-STEP, 0), (STEP, 0), (0, -STEP), (0, STEP)]:  # Left, Right, Up, Down
+                next_step = (current[0] + dx, current[1] + dy)
+                if next_step in effective_obstacles:
+                    if next_step in dynamic_obstacles:  # It's a block
+                        push_direction = get_direction_key(dx, dy)
+                        block_next = (next_step[0] + dx, next_step[1] + dy)
+                        if can_push_block(push_direction, next_step, block_next) and block_next not in effective_obstacles:
+                            new_cost = cost_so_far[current] + 1 + (1 - direction_success_rates.get(push_direction, 0)) * 0.5
+                            if next_step not in cost_so_far or new_cost < cost_so_far[next_step]:
+                                cost_so_far[next_step] = new_cost
+                                priority = new_cost + heuristic(goal, next_step)
+                                heapq.heappush(frontier, (priority, next_step))
+                                came_from[next_step] = current
+                    continue  # Skip if not pushable
+                new_cost = cost_so_far[current] + 1 + (1 - direction_success_rates.get(get_direction_key(dx, dy), 0)) * 0.5
+                if next_step not in cost_so_far or new_cost < cost_so_far[next_step]:
+                    cost_so_far[next_step] = new_cost
+                    priority = new_cost + heuristic(goal, next_step)
+                    heapq.heappush(frontier, (priority, next_step))
+                    came_from[next_step] = current
+        
+        if goal not in came_from:
+            return None
+        current = goal
+        path = []
+        while current != start:
+            path.append(current)
+            current = came_from[current]
+        path.reverse()
+        return path if len(path) <= state["resources"]["steps_remaining"] else None  # Budget-aware
+    
+    def get_direction_key(dx, dy):
+        if dx == STEP: return "MOVE_RIGHT"
+        if dx == -STEP: return "MOVE_LEFT"
+        if dy == STEP: return "MOVE_DOWN"
+        if dy == -STEP: return "MOVE_UP"
+        return None
+    
+    def get_move_direction(from_pos, to_pos):
+        if from_pos[0] < to_pos[0]: return "MOVE_RIGHT"
+        if from_pos[0] > to_pos[0]: return "MOVE_LEFT"
+        if from_pos[1] < to_pos[1]: return "MOVE_DOWN"
+        if from_pos[1] > to_pos[1]: return "MOVE_UP"
+        return None
+    
+    def analyze_history(history):
+        direction_success = defaultdict(int)
+        direction_attempts = defaultdict(int)
+        per_selectable_success = defaultdict(lambda: defaultdict(int))
+        
+        for turn in history:
+            action = turn["action"].get("action")
+            if action in ["MOVE_RIGHT", "MOVE_LEFT", "MOVE_UP", "MOVE_DOWN"]:
+                direction_attempts[action] += 1
+                if turn["moved"]:
+                    direction_success[action] += 1
+                selectable_id = turn["state"]["player"]["id"]
+                if turn["moved"]:
+                    per_selectable_success[selectable_id][action] += 1
+        success_rates = {d: (direction_success[d] / direction_attempts[d]) if direction_attempts[d] > 0 else 0 for d in direction_success}
+        return success_rates, per_selectable_success
+    
+    def is_stuck(history):
+        return len(history) >= 3 and not any(turn["moved"] for turn in history[-3:])
+    
+    def evaluate_selectable(selectable, goal_pos, per_success, state):
+        sel_pos = tuple(selectable["position"])
+        dist_to_goal = heuristic(sel_pos, goal_pos)
+        sel_id = selectable["id"]
+        sel_success = sum(per_success.get(sel_id, {}).values())
+        nearby_blocks = sum(1 for block in state["objects"]["blocks"] if heuristic(sel_pos, tuple(block["position"])) <= 6)
+        return dist_to_goal - (sel_success * 2) + nearby_blocks  # Lower score is better
+    
+    player_pos = tuple(state["player"]["position"])
+    goals = state["objects"]["goals"]
+    walls = {tuple(wall["position"]) for wall in state["objects"]["walls"]}
+    blocks = {tuple(block["position"]) for block in state["objects"]["blocks"]}
+    
+    success_rates, per_selectable_success = analyze_history(history)
+    
+    # Level-specific strategy for Level 1
+    if state["level"]["current"] == 1:
+        if player_pos == (3, 21) or player_pos == (0, 21):
+            return {"action": "MOVE_DOWN"}  # Probe transfer wall
+        elif player_pos[0] > 3:
+            return {"action": "MOVE_LEFT"}  # Move left until position
+        else:
+            return {"action": "MOVE_DOWN"}  # Continue probing
+    
+    if goals and state["resources"]["steps_remaining"] > 10:
+        goal_pos = tuple(goals[0]["position"])
+        path = a_star_search(player_pos, goal_pos, walls, blocks, success_rates, history)
+        
+        if path:
+            next_step = path[0]
+            move_direction = get_move_direction(player_pos, next_step)
+            return {"action": move_direction}
+        
+        if is_stuck(history):
+            selectables = state["objects"]["selectables"]
+            if selectables and goals:
+                goal_pos = tuple(goals[0]["position"])
+                best_selectable = min(selectables, key=lambda s: evaluate_selectable(s, goal_pos, per_selectable_success, state))
+                if tuple(best_selectable["position"]) != player_pos:
+                    return {"action": "CLICK", "target_position": best_selectable["position"]}
+    
+    # Fallback: Choose direction with highest success rate
+    directions = ["MOVE_RIGHT", "MOVE_LEFT", "MOVE_UP", "MOVE_DOWN"]
+    valid_directions = [d for d in directions if success_rates.get(d, 0) > 0.5]  # Bias towards high success
+    if valid_directions:
+        return {"action": max(valid_directions, key=lambda d: success_rates[d])}
+    return {"action": directions[len(history) % len(directions)]}  # Default cycle

@@ -1,0 +1,136 @@
+import heapq
+
+def agent_step(state, history):
+    def heuristic(a, b):
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])  # Manhattan distance
+    
+    def a_star_search(start, goal, walls, blocks, max_depth=50):  # Added max_depth for optimization
+        frontier = []
+        heapq.heappush(frontier, (0, start))
+        came_from = {}
+        cost_so_far = {}
+        came_from[start] = None
+        cost_so_far[start] = 0
+        
+        while frontier and len(frontier) < max_depth:  # Limit to prevent excessive computation
+            current_cost, current = heapq.heappop(frontier)
+            
+            if current == goal:
+                break
+            
+            for dx, dy in [(-3, 0), (3, 0), (0, -3), (0, 3)]:
+                next_step = (current[0] + dx, current[1] + dy)
+                if next_step in walls or next_step in blocks:
+                    continue
+                new_cost = cost_so_far[current] + 1
+                if next_step not in cost_so_far or new_cost < cost_so_far[next_step]:
+                    cost_so_far[next_step] = new_cost
+                    priority = new_cost + heuristic(goal, next_step)
+                    heapq.heappush(frontier, (priority, next_step))
+                    came_from[next_step] = current
+        
+        if goal not in came_from:
+            return None  # No path found
+        
+        # Reconstruct path
+        current = goal
+        path = []
+        while current != start:
+            path.append(current)
+            current = came_from[current]
+        path.reverse()
+        return path
+
+    def get_move_direction(from_pos, to_pos):
+        if from_pos[0] < to_pos[0]:
+            return "MOVE_RIGHT"
+        elif from_pos[0] > to_pos[0]:
+            return "MOVE_LEFT"
+        elif from_pos[1] < to_pos[1]:
+            return "MOVE_DOWN"
+        elif from_pos[1] > to_pos[1]:
+            return "MOVE_UP"
+        return None
+
+    def get_best_selectable(selectables, goals, history):
+        if not goals or not selectables:
+            return None
+        goal_pos = tuple(goals[0]["position"])
+        # Evaluate based on proximity and historical success: prefer selectables that have moved successfully in the past
+        successful_moves = {}  # Track based on history
+        for entry in history:
+            if entry.get("moved", False):
+                selectable_id = entry["state"]["player"]["id"]
+                if selectable_id in [s["id"] for s in selectables]:
+                    successful_moves[selectable_id] = successful_moves.get(selectable_id, 0) + 1
+        if successful_moves:
+            best = min(selectables, key=lambda s: (heuristic(tuple(s["position"]), goal_pos), -successful_moves.get(s["id"], 0)))
+        else:
+            best = min(selectables, key=lambda s: heuristic(tuple(s["position"]), goal_pos))
+        return best if tuple(best["position"]) != tuple(state["player"]["position"]) else None
+
+    # Analyze history for learning
+    failure_counts = {"MOVE_RIGHT": 0, "MOVE_LEFT": 0, "MOVE_DOWN": 0, "MOVE_UP": 0}
+    success_counts = {"MOVE_RIGHT": 0, "MOVE_LEFT": 0, "MOVE_DOWN": 0, "MOVE_UP": 0}
+    known_blocked = set()  # From history
+    for entry in history[-10:]:  # Last 10 turns
+        action = entry.get("action", {}).get("action")
+        moved = entry.get("moved", False)
+        if action in failure_counts:
+            if not moved:
+                failure_counts[action] += 1
+                # Add blocked position
+                prev_pos = tuple(entry["state"]["player"]["position"])
+                if action == "MOVE_RIGHT":
+                    known_blocked.add((prev_pos[0] + 3, prev_pos[1]))
+                elif action == "MOVE_LEFT":
+                    known_blocked.add((prev_pos[0] - 3, prev_pos[1]))
+                elif action == "MOVE_UP":
+                    known_blocked.add((prev_pos[0], prev_pos[1] - 3))
+                elif action == "MOVE_DOWN":
+                    known_blocked.add((prev_pos[0], prev_pos[1] + 3))
+            else:
+                success_counts[action] += 1
+
+    player_pos = tuple(state["player"]["position"])
+    goals = state["objects"]["goals"]
+    walls = {tuple(wall["position"]) for wall in state["objects"]["walls"]}
+    blocks = {tuple(block["position"]) for block in state["objects"]["blocks"]}.union(known_blocked)
+    
+    # Incorporate heuristic hints
+    heuristic_hints = state["movement"]
+    if heuristic_hints.get("right_blocked"):
+        blocks.add((player_pos[0] + 3, player_pos[1]))
+    if heuristic_hints.get("left_blocked"):
+        blocks.add((player_pos[0] - 3, player_pos[1]))
+    if heuristic_hints.get("up_blocked"):
+        blocks.add((player_pos[0], player_pos[1] - 3))
+    if heuristic_hints.get("down_blocked"):
+        blocks.add((player_pos[0], player_pos[1] + 3))
+    
+    steps_remaining = state["resources"]["steps_remaining"]
+    
+    if goals and steps_remaining > 0:
+        goal_pos = tuple(goals[0]["position"])
+        path = a_star_search(player_pos, goal_pos, walls, blocks)
+        
+        if path:
+            next_step = path[0]
+            move_direction = get_move_direction(player_pos, next_step)
+            if move_direction and success_counts.get(move_direction, 0) > failure_counts.get(move_direction, 0):
+                return {"action": move_direction}  # Bias towards successful directions
+        
+        if len(history) >= 3 and all(not turn["moved"] for turn in history[-3:]) and steps_remaining > 10:  # Only switch if not too late
+            selectables = state["objects"]["selectables"]
+            best_selectable = get_best_selectable(selectables, goals, history)
+            if best_selectable:
+                return {"action": "CLICK", "target_position": best_selectable["position"]}
+    
+    # Fallback: Prioritize directions with higher success minus failures, and probe if failures are high
+    possible_actions = ["MOVE_RIGHT", "MOVE_DOWN", "MOVE_LEFT", "MOVE_UP"]
+    sorted_actions = sorted(possible_actions, key=lambda a: (success_counts.get(a, 0) - failure_counts.get(a, 0), -failure_counts.get(a, 0)), reverse=True)
+    for action in sorted_actions:
+        if failure_counts.get(action, 0) < 5 or steps_remaining < 20:  # Probe if failures are low or steps are low
+            return {"action": action}
+    
+    return {"action": "MOVE_RIGHT"}  # Absolute fallback

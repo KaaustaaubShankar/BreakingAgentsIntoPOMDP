@@ -1,0 +1,153 @@
+import heapq
+from collections import defaultdict
+import math
+
+def agent_step(state, history):
+    def heuristic(a, b):
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])  # Manhattan distance
+    
+    def a_star_search(start, goal, walls, dynamic_obstacles, blocks, success_rates, failure_penalties):
+        frontier = []
+        heapq.heappush(frontier, (0, start))
+        came_from = {}
+        cost_so_far = {}
+        came_from[start] = None
+        cost_so_far[start] = 0
+        
+        def can_push_block(next_step, dx, dy):
+            if next_step in blocks:
+                new_block_pos = (next_step[0] + dx, next_step[1] + dy)
+                if new_block_pos not in walls and new_block_pos not in blocks and new_block_pos not in dynamic_obstacles:
+                    return True  # Can push
+            return False
+        
+        while frontier:
+            _, current = heapq.heappop(frontier)
+            
+            if current == goal:
+                break
+            
+            for dx, dy in [(-3, 0), (3, 0), (0, -3), (0, 3)]:  # Left, Right, Up, Down
+                next_step = (current[0] + dx, current[1] + dy)
+                direction_key = get_direction_key(dx, dy)
+                if next_step in walls or next_step in dynamic_obstacles:
+                    continue  # Standard obstacle
+                if next_step in blocks:
+                    if can_push_block(next_step, dx, dy):
+                        new_cost = cost_so_far[current] + 1.5  # Higher cost for pushing
+                    else:
+                        continue  # Can't push
+                else:
+                    base_cost = 1 + (failure_penalties.get(direction_key, 0) * 0.15)
+                    if direction_key in success_rates:
+                        base_cost -= success_rates[direction_key] * 0.05
+                    new_cost = cost_so_far[current] + base_cost
+                if next_step not in cost_so_far or new_cost < cost_so_far[next_step]:
+                    cost_so_far[next_step] = new_cost
+                    priority = new_cost + heuristic(goal, next_step)
+                    heapq.heappush(frontier, (priority, next_step))
+                    came_from[next_step] = current
+        
+        if goal not in came_from:
+            return None  # No path found
+        current = goal
+        path = []
+        while current != start:
+            path.append(current)
+            current = came_from[current]
+        path.reverse()
+        return path
+    
+    def get_direction_key(dx, dy):
+        if dx == 3: return "MOVE_RIGHT"
+        if dx == -3: return "MOVE_LEFT"
+        if dy == 3: return "MOVE_DOWN"
+        if dy == -3: return "MOVE_UP"
+        return None
+    
+    def get_move_direction(from_pos, to_pos):
+        if from_pos[0] < to_pos[0]: return "MOVE_RIGHT"
+        if from_pos[0] > to_pos[0]: return "MOVE_LEFT"
+        if from_pos[1] < to_pos[1]: return "MOVE_DOWN"
+        if from_pos[1] > to_pos[1]: return "MOVE_UP"
+        return None
+    
+    def analyze_history(history):
+        direction_success = defaultdict(int)
+        direction_failures = defaultdict(int)
+        dynamic_weights = defaultdict(int)  # For probing and learning
+        consecutive_stuck = 0
+        for turn in reversed(history):
+            if not turn.get("moved", False):
+                consecutive_stuck += 1
+                if "action" in turn and turn["action"].get("action"):
+                    action = turn["action"]["action"]
+                    direction_failures[action] += 1
+                    # Learn from failed moves
+                    prev_pos = tuple(turn["state"]["player"]["position"])
+                    if action == "MOVE_RIGHT":
+                        dynamic_weights[(prev_pos[0] + 3, prev_pos[1])] += 1
+                    elif action == "MOVE_LEFT":
+                        dynamic_weights[(prev_pos[0] - 3, prev_pos[1])] += 1
+                    elif action == "MOVE_UP":
+                        dynamic_weights[(prev_pos[0], prev_pos[1] - 3)] += 1
+                    elif action == "MOVE_DOWN":
+                        dynamic_weights[(prev_pos[0], prev_pos[1] + 3)] += 1
+            else:
+                consecutive_stuck = 0
+                if "action" in turn and turn["action"].get("action"):
+                    action = turn["action"]["action"]
+                    direction_success[action] += 1
+        success_rates = {d: (direction_success[d] / (direction_success[d] + direction_failures[d])) if (direction_success[d] + direction_failures[d]) > 0 else 0 for d in set(direction_success) | set(direction_failures)}
+        failure_penalties = direction_failures  # Use raw counts for penalties
+        return success_rates, failure_penalties, consecutive_stuck, dynamic_weights
+    
+    player_pos = tuple(state["player"]["position"])
+    goals = state["objects"]["goals"]
+    walls = {tuple(wall["position"]) for wall in state["objects"]["walls"]}
+    blocks = {tuple(block["position"]) for block in state["objects"]["blocks"]}
+    
+    dynamic_obstacles = set(blocks)  # Start with blocks
+    # Add heuristic hints
+    if state["movement"].get("right_blocked", False):
+        dynamic_obstacles.add((player_pos[0] + 3, player_pos[1]))
+    if state["movement"].get("left_blocked", False):
+        dynamic_obstacles.add((player_pos[0] - 3, player_pos[1]))
+    if state["movement"].get("up_blocked", False):
+        dynamic_obstacles.add((player_pos[0], player_pos[1] - 3))
+    if state["movement"].get("down_blocked", False):
+        dynamic_obstacles.add((player_pos[0], player_pos[1] + 3))
+    
+    success_rates, failure_penalties, consecutive_stuck, dynamic_weights = analyze_history(history)
+    # Update dynamic obstacles based on learned weights
+    for pos, weight in dynamic_weights.items():
+        if weight >= 3:  # Threshold for considering as obstacle
+            dynamic_obstacles.add(pos)
+    
+    if goals and state["resources"]["steps_remaining"] > 0:
+        goals_sorted = sorted(goals, key=lambda g: heuristic(player_pos, tuple(g["position"])))
+        for goal in goals_sorted:
+            goal_pos = tuple(goal["position"])
+            path = a_star_search(player_pos, goal_pos, walls, dynamic_obstacles, blocks, success_rates, failure_penalties)
+            if path:
+                next_step = path[0]
+                move_direction = get_move_direction(player_pos, next_step)
+                return {"action": move_direction}
+        
+        if consecutive_stuck >= 3:
+            selectables = state["objects"]["selectables"]
+            other_selectables = [s for s in selectables if tuple(s["position"]) != player_pos]
+            if other_selectables:
+                goals_pos = [tuple(goal["position"]) for goal in goals]
+                best_selectable = min(other_selectables, key=lambda s: min(heuristic(tuple(s["position"]), g) for g in goals_pos))
+                return {"action": "CLICK", "target_position": best_selectable["position"]}
+        
+        # Fallback to best direction based on success rates
+        possible_actions = ["MOVE_RIGHT", "MOVE_DOWN", "MOVE_LEFT", "MOVE_UP"]
+        best_action = max(possible_actions, key=lambda action: success_rates.get(action, 0))
+        return {"action": best_action}
+    
+    # Ultimate fallback
+    cycle = ["MOVE_RIGHT", "MOVE_DOWN", "MOVE_LEFT", "MOVE_UP"]
+    step = len(history)
+    return {"action": cycle[step % len(cycle)]}

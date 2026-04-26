@@ -1,0 +1,128 @@
+import heapq
+from collections import defaultdict
+import math  # For any potential calculations, though not heavily used
+
+def agent_step(state, history):
+    def heuristic(a, b):
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+    
+    def a_star_search(start, goal, walls, blocks, known_blocked):
+        effective_blocks = blocks.union(known_blocked)  # Combine static and learned blocks
+        frontier = []
+        heapq.heappush(frontier, (0, start))
+        came_from = {}
+        cost_so_far = {}
+        came_from[start] = None
+        cost_so_far[start] = 0
+        
+        while frontier:
+            _, current = heapq.heappop(frontier)
+            
+            if current == goal:
+                break
+            
+            for dx, dy in [(-3, 0), (3, 0), (0, -3), (0, 3)]:  # Left, Right, Up, Down
+                next_step = (current[0] + dx, current[1] + dy)
+                if next_step in walls or next_step in effective_blocks:
+                    continue
+                new_cost = cost_so_far[current] + 1  # Simple cost for grid movement
+                if next_step not in cost_so_far or new_cost < cost_so_far[next_step]:
+                    cost_so_far[next_step] = new_cost
+                    priority = new_cost + heuristic(goal, next_step)
+                    heapq.heappush(frontier, (priority, next_step))
+                    came_from[next_step] = current
+        
+        if goal not in came_from:
+            return None  # No path found
+        current = goal
+        path = []
+        while current != start:
+            path.append(current)
+            current = came_from[current]
+        path.reverse()
+        return path
+
+    def get_move_direction(from_pos, to_pos):
+        if from_pos[0] < to_pos[0]:
+            return "MOVE_RIGHT"
+        elif from_pos[0] > to_pos[0]:
+            return "MOVE_LEFT"
+        elif from_pos[1] < to_pos[1]:
+            return "MOVE_DOWN"
+        elif from_pos[1] > to_pos[1]:
+            return "MOVE_UP"
+        return None
+
+    player_pos = tuple(state["player"]["position"])
+    goals = state["objects"]["goals"]
+    walls = {tuple(wall["position"]) for wall in state["objects"]["walls"]}
+    blocks = {tuple(block["position"]) for block in state["objects"]["blocks"]}
+    
+    # Analyze history: Track failures, successes, and learn blocked positions
+    known_blocked = set()  # Positions that blocked movement
+    success_counts = defaultdict(int)  # Successful moves per direction
+    failure_counts = defaultdict(int)  # Failed moves per direction
+    consecutive_stuck = 0
+    recent_history_limit = 10  # Limit to recent turns for efficiency
+    
+    for turn in history[-recent_history_limit:]:  # Only recent history to optimize runtime
+        if not turn["moved"]:
+            prev_action = turn["action"]["action"]
+            if prev_action == "MOVE_RIGHT":
+                known_blocked.add((turn["state"]["player"]["position"][0] + 3, turn["state"]["player"]["position"][1]))
+                failure_counts["MOVE_RIGHT"] += 1
+            elif prev_action == "MOVE_LEFT":
+                known_blocked.add((turn["state"]["player"]["position"][0] - 3, turn["state"]["player"]["position"][1]))
+                failure_counts["MOVE_LEFT"] += 1
+            elif prev_action == "MOVE_UP":
+                known_blocked.add((turn["state"]["player"]["position"][0], turn["state"]["player"]["position"][1] - 3))
+                failure_counts["MOVE_UP"] += 1
+            elif prev_action == "MOVE_DOWN":
+                known_blocked.add((turn["state"]["player"]["position"][0], turn["state"]["player"]["position"][1] + 3))
+                failure_counts["MOVE_DOWN"] += 1
+            consecutive_stuck += 1
+        else:
+            prev_action = turn["action"]["action"]
+            if prev_action in success_counts:
+                success_counts[prev_action] += 1
+            consecutive_stuck = 0  # Reset on success
+    
+    # Incorporate heuristic hints
+    if state["movement"]["right_blocked"]:
+        known_blocked.add((player_pos[0] + 3, player_pos[1]))
+    if state["movement"]["left_blocked"]:
+        known_blocked.add((player_pos[0] - 3, player_pos[1]))
+    if state["movement"]["up_blocked"]:
+        known_blocked.add((player_pos[0], player_pos[1] - 3))
+    if state["movement"]["down_blocked"]:
+        known_blocked.add((player_pos[0], player_pos[1] + 3))
+    
+    if goals and len(history) < state["resources"]["steps_remaining"]:
+        goal_pos = tuple(goals[0]["position"])  # Target the first goal
+        path = a_star_search(player_pos, goal_pos, walls, blocks, known_blocked)
+        
+        if path:
+            next_step = path[0]
+            move_direction = get_move_direction(player_pos, next_step)
+            # Prioritize based on success counts
+            if success_counts[move_direction] > min(success_counts.values(), default=0):
+                return {"action": move_direction}
+        
+        # Proactive switching: Evaluate if another piece has a path
+        selectables = state["objects"]["selectables"]
+        for selectable in selectables:
+            sel_pos = tuple(selectable["position"])
+            if sel_pos != player_pos:
+                sel_path = a_star_search(sel_pos, goal_pos, walls, blocks, known_blocked)
+                if sel_path:  # If another piece has a path, switch to it
+                    return {"action": "CLICK", "target_position": list(selectable["position"])}
+        
+        if consecutive_stuck >= 2:  # Switch if stuck, but after checking paths
+            for selectable in selectables:
+                if tuple(selectable["position"]) != player_pos:
+                    return {"action": "CLICK", "target_position": list(selectable["position"])}
+    
+    # Fallback: Choose direction with highest success count
+    directions = ["MOVE_RIGHT", "MOVE_LEFT", "MOVE_UP", "MOVE_DOWN"]
+    best_direction = max(directions, key=lambda d: success_counts[d])
+    return {"action": best_direction}

@@ -1,0 +1,155 @@
+import heapq
+
+def agent_step(state, history):
+    def heuristic(a, b):
+        """Calculate Manhattan distance as heuristic."""
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+    def a_star_search(start, goal, walls, blocks):
+        """Perform A* search for pathfinding."""
+        frontier = []
+        heapq.heappush(frontier, (0, start))
+        came_from = {}
+        cost_so_far = {}
+        came_from[start] = None
+        cost_so_far[start] = 0
+
+        while frontier:
+            _, current = heapq.heappop(frontier)
+
+            if current == goal:
+                break
+
+            for dx, dy in [(-3, 0), (3, 0), (0, -3), (0, 3)]:
+                next_step = (current[0] + dx, current[1] + dy)
+                if next_step in walls or next_step in blocks:
+                    continue
+                new_cost = cost_so_far[current] + 1
+                if next_step not in cost_so_far or new_cost < cost_so_far[next_step]:
+                    cost_so_far[next_step] = new_cost
+                    priority = new_cost + heuristic(goal, next_step)
+                    heapq.heappush(frontier, (priority, next_step))
+                    came_from[next_step] = current
+
+        # Reconstruct path
+        current = goal
+        path = []
+        while current != start:
+            if current is None:
+                return None
+            path.append(current)
+            current = came_from[current]
+        path.reverse()
+        return path
+
+    def get_move_direction(from_pos, to_pos):
+        """Get move direction based on positions."""
+        if from_pos[0] < to_pos[0]:
+            return "MOVE_RIGHT"
+        elif from_pos[0] > to_pos[0]:
+            return "MOVE_LEFT"
+        elif from_pos[1] < to_pos[1]:
+            return "MOVE_DOWN"
+        elif from_pos[1] > to_pos[1]:
+            return "MOVE_UP"
+        return None
+
+    def is_stuck():
+        """Check if the agent is stuck."""
+        return len(history) >= 3 and not any(turn["moved"] for turn in history[-3:])
+
+    player_pos = tuple(state["player"]["position"])
+    goals = state["objects"]["goals"]
+    walls = {tuple(wall["position"]) for wall in state["objects"]["walls"]}
+    blocks = {tuple(block["position"]) for block in state["objects"]["blocks"]}
+
+    # Strategy to switch to a different piece if stuck
+    if is_stuck():
+        import math  # Assuming this is allowed as part of replacement; ensure it's not already imported
+        selectables = state["objects"]["selectables"]
+        goals = state["objects"]["goals"]
+        if goals:  # Only proceed if goals exist
+            goal_pos = tuple(goals[0]["position"])  # Use the first goal for simplicity
+            best_selectable = None
+            min_distance = float('inf')
+            for selectable in selectables:
+                sel_pos = tuple(selectable["position"])
+                if sel_pos != player_pos:
+                    distance = math.sqrt((sel_pos[0] - goal_pos[0])**2 + (sel_pos[1] - goal_pos[1])**2)  # Euclidean distance
+                    if distance < min_distance:
+                        min_distance = distance
+                        # Add reachability check before selecting
+            if a_star_search(tuple(selectable["position"]), goal_pos, walls, blocks):  # Quick check if path exists
+                best_selectable = selectable
+            if best_selectable:
+                return {"action": "CLICK", "target_position": best_selectable["position"]}
+
+    # Use heuristic hints to avoid blocked paths
+    if state["movement"]["right_blocked"]:
+        blocks.add((player_pos[0] + 3, player_pos[1]))
+    if state["movement"]["left_blocked"]:
+        blocks.add((player_pos[0] - 3, player_pos[1]))
+    if state["movement"]["up_blocked"]:
+        blocks.add((player_pos[0], player_pos[1] - 3))
+    if state["movement"]["down_blocked"]:
+        blocks.add((player_pos[0], player_pos[1] + 3))
+
+    # If path is found, move toward the goal
+    if goals:
+        goal_pos = tuple(goals[0]["position"])
+        # Enhanced A* to incorporate historical blocked paths
+        historical_blocks = set()
+        for turn in history:
+            if not turn["moved"] and "action" in turn and turn["action"].get("action") in ["MOVE_RIGHT", "MOVE_LEFT", "MOVE_UP", "MOVE_DOWN"]:
+                attempted_direction = turn["action"]["action"]
+                attempted_pos = player_pos  # Use current pos as reference; in practice, track from history if needed
+                if attempted_direction == "MOVE_RIGHT":
+                    historical_blocks.add((attempted_pos[0] + 3, attempted_pos[1]))
+                elif attempted_direction == "MOVE_LEFT":
+                    historical_blocks.add((attempted_pos[0] - 3, attempted_pos[1]))
+                elif attempted_direction == "MOVE_UP":
+                    historical_blocks.add((attempted_pos[0], attempted_pos[1] - 3))
+                elif attempted_direction == "MOVE_DOWN":
+                    historical_blocks.add((attempted_pos[0], attempted_pos[1] + 3))
+        effective_blocks = blocks.union(historical_blocks)  # Merge with current blocks
+        path = a_star_search(player_pos, goal_pos, walls, effective_blocks)
+
+        if path:
+            next_step = path[0]
+            move_direction = get_move_direction(player_pos, next_step)
+            if move_direction:
+                return {"action": move_direction}
+
+    # Improved fallback: Choose direction with highest success rate from history
+    direction_success = {"MOVE_RIGHT": 0, "MOVE_LEFT": 0, "MOVE_UP": 0, "MOVE_DOWN": 0}
+    total_attempts = {"MOVE_RIGHT": 0, "MOVE_LEFT": 0, "MOVE_UP": 0, "MOVE_DOWN": 0}
+    
+    for turn in history:
+        action = turn["action"].get("action")  # Get the action string
+        if action in direction_success:  # Ensure it's a movement action
+            total_attempts[action] += 1
+            if turn["moved"]:
+                direction_success[action] += 1  # Increment success count if moved
+    
+    # Calculate success rates; avoid division by zero
+    success_rates = {}
+    for direction in direction_success:
+        if total_attempts[direction] > 0:
+            success_rates[direction] = direction_success[direction] / total_attempts[direction]
+        else:
+            success_rates[direction] = 0  # No attempts, rate 0
+    
+    # Select the direction with the highest success rate
+    # Select best direction while considering current blockages
+    possible_directions = sorted(success_rates.items(), key=lambda x: x[1], reverse=True)  # Sort by success rate
+    for direction, rate in possible_directions:
+        if direction == "MOVE_RIGHT" and not state["movement"]["right_blocked"]:
+            return {"action": direction}
+        elif direction == "MOVE_LEFT" and not state["movement"]["left_blocked"]:
+            return {"action": direction}
+        elif direction == "MOVE_UP" and not state["movement"]["up_blocked"]:
+            return {"action": direction}
+        elif direction == "MOVE_DOWN" and not state["movement"]["down_blocked"]:
+            return {"action": direction}
+    # If all are blocked, fall back to the highest rate anyway
+    return {"action": max(success_rates, key=success_rates.get)}

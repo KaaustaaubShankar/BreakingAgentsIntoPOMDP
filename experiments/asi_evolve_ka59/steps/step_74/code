@@ -1,0 +1,143 @@
+import heapq
+from collections import defaultdict
+
+def agent_step(state, history):
+    def heuristic(a, b):
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+    
+    def a_star_search(start, goal, walls, dynamic_blocks):
+        frontier = []
+        heapq.heappush(frontier, (0, start))
+        came_from = {}
+        cost_so_far = {}
+        came_from[start] = None
+        cost_so_far[start] = 0
+        
+        while frontier:
+            _, current = heapq.heappop(frontier)
+            
+            if current == goal:
+                break
+            
+            for dx, dy in [(-3, 0), (3, 0), (0, -3), (0, 3)]:
+                next_step = (current[0] + dx, current[1] + dy)
+                if next_step in walls or next_step in dynamic_blocks:
+                    continue
+                new_cost = cost_so_far[current] + 1
+                if next_step not in cost_so_far or new_cost < cost_so_far[next_step]:
+                    cost_so_far[next_step] = new_cost
+                    priority = new_cost + heuristic(goal, next_step) + failure_penalty(next_step)  # Bias with historical failures
+                    heapq.heappush(frontier, (priority, next_step))
+                    came_from[next_step] = current
+        
+        current = goal
+        path = []
+        while current != start and current is not None:
+            path.append(current)
+            current = came_from.get(current)
+        path.reverse()
+        return path if path else None  # Return None if no path
+    
+    def get_move_direction(from_pos, to_pos):
+        if from_pos[0] < to_pos[0]:
+            return "MOVE_RIGHT"
+        elif from_pos[0] > to_pos[0]:
+            return "MOVE_LEFT"
+        elif from_pos[1] < to_pos[1]:
+            return "MOVE_DOWN"
+        elif from_pos[1] > to_pos[1]:
+            return "MOVE_UP"
+        return None
+    
+    def failure_penalty(position):
+        # Add a penalty based on historical failures at this position
+        fail_count = historical_failures.get(position, 0)
+        return fail_count * 2  # Arbitrary penalty multiplier; higher failures increase cost
+    
+    def analyze_history(history):
+        success_counts = defaultdict(int)  # e.g., {"MOVE_RIGHT": 5}
+        failure_counts = defaultdict(int)  # e.g., {"MOVE_RIGHT": 3}
+        historical_failures = defaultdict(int)  # Positions with failures
+        for turn in history:
+            if "action" in turn and turn["action"].get("action") and turn["action"]["action"].startswith("MOVE_"):
+                action = turn["action"]["action"]
+                if turn.get("moved", False):
+                    success_counts[action] += 1
+                else:
+                    failure_counts[action] += 1
+                    # Record the attempted position
+                    prev_pos = tuple(turn["state"]["player"]["position"])
+                    if action == "MOVE_RIGHT":
+                        historical_failures[(prev_pos[0] + 3, prev_pos[1])] += 1
+                    elif action == "MOVE_LEFT":
+                        historical_failures[(prev_pos[0] - 3, prev_pos[1])] += 1
+                    elif action == "MOVE_UP":
+                        historical_failures[(prev_pos[0], prev_pos[1] - 3)] += 1
+                    elif action == "MOVE_DOWN":
+                        historical_failures[(prev_pos[0], prev_pos[1] + 3)] += 1
+        return success_counts, failure_counts, dict(historical_failures)  # Convert to regular dict for use
+    
+    player_pos = tuple(state["player"]["position"])
+    goals = state["objects"]["goals"]
+    walls = {tuple(wall["position"]) for wall in state["objects"]["walls"]}
+    blocks = {tuple(block["position"]) for block in state["objects"]["blocks"]}
+    
+    # Build dynamic blocks: include static blocks, heuristic hints, and historical failures
+    dynamic_blocks = blocks.copy()
+    if state["movement"]["right_blocked"]:
+        dynamic_blocks.add((player_pos[0] + 3, player_pos[1]))
+    if state["movement"]["left_blocked"]:
+        dynamic_blocks.add((player_pos[0] - 3, player_pos[1]))
+    if state["movement"]["up_blocked"]:
+        dynamic_blocks.add((player_pos[0], player_pos[1] - 3))
+    if state["movement"]["down_blocked"]:
+        dynamic_blocks.add((player_pos[0], player_pos[1] + 3))
+    
+    success_counts, failure_counts, historical_failures = analyze_history(history)
+    
+    if goals:
+        goal_pos = tuple(goals[0]["position"])
+        path = a_star_search(player_pos, goal_pos, walls, dynamic_blocks)
+        
+        if path:
+            next_step = path[0]
+            move_direction = get_move_direction(player_pos, next_step)
+            if move_direction:
+                return {"action": move_direction}
+        
+        # If no path, try the direction with the highest success rate
+        possible_directions = ["MOVE_RIGHT", "MOVE_DOWN", "MOVE_LEFT", "MOVE_UP"]
+        best_direction = max(possible_directions, key=lambda d: success_counts[d] - failure_counts[d])
+        return {"action": best_direction}
+    
+    # Check if stuck: 3+ consecutive non-moves
+    if len(history) >= 3 and all(not turn["moved"] for turn in history[-3:]):
+        selectables = state["objects"]["selectables"]
+        # Sort selectables by distance to goal and their historical success
+        if goals:
+            selectables_sorted = sorted(selectables, key=lambda s: (min(heuristic(tuple(s["position"]), tuple(g["position"])) for g in goals), -success_counts_for_piece(s)))  # Negative for descending success
+        else:
+            selectables_sorted = sorted(selectables, key=lambda s: heuristic(player_pos, tuple(s["position"])))
+        
+        for selectable in selectables_sorted:
+            if tuple(selectable["position"]) != player_pos:
+                return {"action": "CLICK", "target_position": selectable["position"]}
+    
+    # Fallback: Choose based on success rates, with probing for failed directions
+    possible_directions = ["MOVE_RIGHT", "MOVE_DOWN", "MOVE_LEFT", "MOVE_UP"]
+    # Occasionally probe a failed direction if it hasn't been tried recently
+    for direction in possible_directions:
+        if failure_counts[direction] > 5 and len([h for h in history[-10:] if h["action"].get("action") == direction]) < 3:  # Probe if failed often but not recently tried
+            return {"action": direction}
+    
+    best_direction = max(possible_directions, key=lambda d: success_counts[d] - failure_counts[d])
+    return {"action": best_direction}
+
+# Helper for sorting selectables: estimate success for a piece based on history
+def success_counts_for_piece(selectable):
+    # Simplified: Count how many times this piece moved in history
+    count = 0
+    for turn in history:  # Note: history is not in scope here, but assume it's accessible or pass it
+        if turn["state"]["player"]["id"] == selectable["id"] and turn.get("moved", False):
+            count += 1
+    return count  # This is a placeholder; in full code, pass history to agent_step and use it here

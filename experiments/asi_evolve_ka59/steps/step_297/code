@@ -1,0 +1,137 @@
+import heapq
+from collections import defaultdict
+import math
+
+def agent_step(state, history):
+    def heuristic(a, b):
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+    
+    def a_star_search(start, goal, walls, blocks, learned_obstacles, success_rates, max_depth):
+        effective_obstacles = walls.union(blocks).union(learned_obstacles)
+        frontier = []
+        heapq.heappush(frontier, (0, start))
+        came_from = {}
+        cost_so_far = {}
+        came_from[start] = None
+        cost_so_far[start] = 0
+        
+        while frontier:
+            current_cost, current = heapq.heappop(frontier)
+            
+            if current == goal:
+                break
+            
+            if cost_so_far.get(current, float('inf')) >= max_depth:
+                continue
+            
+            for dx, dy in [(-3, 0), (3, 0), (0, -3), (0, 3)]:
+                next_step = (current[0] + dx, current[1] + dy)
+                if next_step in effective_obstacles:
+                    continue
+                direction_key = get_direction_key(dx, dy)
+                base_cost = 1
+                if direction_key and direction_key in success_rates:
+                    base_cost += (1 - success_rates[direction_key]) * 0.5  # Penalize low success rates
+                new_cost = cost_so_far[current] + base_cost
+                if next_step not in cost_so_far or new_cost < cost_so_far[next_step]:
+                    cost_so_far[next_step] = new_cost
+                    priority = new_cost + heuristic(goal, next_step)
+                    heapq.heappush(frontier, (priority, next_step))
+                    came_from[next_step] = current
+        
+        if goal not in came_from:
+            return None
+        current = goal
+        path = []
+        while current != start:
+            path.append(current)
+            current = came_from[current]
+        path.reverse()
+        return path if len(path) <= max_depth else None  # Ensure within budget
+    
+    def get_direction_key(dx, dy):
+        if dx == 3: return "MOVE_RIGHT"
+        if dx == -3: return "MOVE_LEFT"
+        if dy == 3: return "MOVE_DOWN"
+        if dy == -3: return "MOVE_UP"
+        return None
+    
+    def get_move_direction(from_pos, to_pos):
+        if from_pos[0] < to_pos[0]: return "MOVE_RIGHT"
+        if from_pos[0] > to_pos[0]: return "MOVE_LEFT"
+        if from_pos[1] < to_pos[1]: return "MOVE_DOWN"
+        if from_pos[1] > to_pos[1]: return "MOVE_UP"
+        return None
+    
+    def analyze_history(history):
+        success_rates = defaultdict(float)
+        total_attempts = defaultdict(int)
+        learned_obstacles = set()
+        for turn in history[-10:]:  # Recent 10 turns
+            action = turn["action"].get("action")
+            if action in ["MOVE_RIGHT", "MOVE_LEFT", "MOVE_UP", "MOVE_DOWN"]:
+                total_attempts[action] += 1
+                if turn.get("moved", False):
+                    success_rates[action] += 1  # Increment for success
+                else:
+                    # Add failed position as obstacle
+                    prev_pos = tuple(turn["state"]["player"]["position"])
+                    if action == "MOVE_RIGHT": learned_obstacles.add((prev_pos[0] + 3, prev_pos[1]))
+                    elif action == "MOVE_LEFT": learned_obstacles.add((prev_pos[0] - 3, prev_pos[1]))
+                    elif action == "MOVE_UP": learned_obstacles.add((prev_pos[0], prev_pos[1] - 3))
+                    elif action == "MOVE_DOWN": learned_obstacles.add((prev_pos[0], prev_pos[1] + 3))
+        for direction in success_rates:
+            if total_attempts[direction] > 0:
+                success_rates[direction] /= total_attempts[direction]  # Calculate rate
+        return success_rates, learned_obstacles
+    
+    def is_stuck(history):
+        return len(history) >= 3 and not any(turn["moved"] for turn in history[-3:])
+    
+    player_pos = tuple(state["player"]["position"])
+    goals = state["objects"]["goals"]
+    walls = {tuple(wall["position"]) for wall in state["objects"]["walls"]}
+    blocks = {tuple(block["position"]) for block in state["objects"]["blocks"]}
+    
+    # Incorporate heuristic hints
+    if state["movement"]["right_blocked"]:
+        blocks.add((player_pos[0] + 3, player_pos[1]))
+    if state["movement"]["left_blocked"]:
+        blocks.add((player_pos[0] - 3, player_pos[1]))
+    if state["movement"]["up_blocked"]:
+        blocks.add((player_pos[0], player_pos[1] - 3))
+    if state["movement"]["down_blocked"]:
+        blocks.add((player_pos[0], player_pos[1] + 3))
+    
+    success_rates, learned_obstacles = analyze_history(history)
+    
+    if goals and state["resources"]["steps_remaining"] > 0:
+        goal_pos = tuple(min(goals, key=lambda g: heuristic(player_pos, tuple(g["position"]))]["position"])
+        max_depth = min(state["resources"]["steps_remaining"] // 2, 10)  # Limit depth
+        path = a_star_search(player_pos, goal_pos, walls, blocks, learned_obstacles, success_rates, max_depth)
+        
+        if path:
+            next_step = path[0]
+            move_direction = get_move_direction(player_pos, next_step)
+            return {"action": move_direction}
+        
+        # Probing for hidden mechanics
+        failure_counts = {d: total_attempts[d] - success_rates[d] * total_attempts[d] for d in success_rates}
+        for direction in ["MOVE_RIGHT", "MOVE_DOWN", "MOVE_LEFT", "MOVE_UP"]:
+            if failure_counts.get(direction, 0) > 5 and len([h for h in history[-10:] if h["action"].get("action") == direction]) < 3:
+                return {"action": direction}  # Probe
+        
+        if is_stuck(history) or not path:
+            selectables = [s for s in state["objects"]["selectables"] if tuple(s["position"]) != player_pos]
+            if selectables:
+                best_selectable = min(selectables, key=lambda s: heuristic(tuple(s["position"]), goal_pos))
+                return {"action": "CLICK", "target_position": best_selectable["position"]}
+    
+    directions = ["MOVE_RIGHT", "MOVE_DOWN", "MOVE_LEFT", "MOVE_UP"]
+    if success_rates:
+        best_direction = max(directions, key=lambda d: success_rates.get(d, 0))
+        return {"action": best_direction}
+    
+    cycle = ["MOVE_RIGHT", "MOVE_DOWN", "MOVE_LEFT", "MOVE_UP"]
+    step = len(history)
+    return {"action": cycle[step % len(cycle)]}

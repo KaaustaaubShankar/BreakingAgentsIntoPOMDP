@@ -1,0 +1,143 @@
+import heapq
+from collections import defaultdict
+
+def agent_step(state, history):
+    def heuristic(a, b):
+        """Calculate Manhattan distance as heuristic."""
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+    def a_star_search(start, goal, walls, blocks, direction_weights):
+        """Perform A* search with direction weights based on history."""
+        frontier = []
+        heapq.heappush(frontier, (0, start))
+        came_from = {}
+        cost_so_far = {}
+        came_from[start] = None
+        cost_so_far[start] = 0
+        
+        while frontier:
+            _, current = heapq.heappop(frontier)
+            
+            if current == goal:
+                break
+            
+            for dx, dy in [(-3, 0), (3, 0), (0, -3), (0, 3)]:  # Left, Right, Up, Down
+                next_step = (current[0] + dx, current[1] + dy)
+                if next_step in walls or next_step in blocks:
+                    continue
+                # Apply weight based on historical success
+                direction_key = None
+                if dx == 3: direction_key = "MOVE_RIGHT"
+                elif dx == -3: direction_key = "MOVE_LEFT"
+                elif dy == 3: direction_key = "MOVE_DOWN"
+                elif dy == -3: direction_key = "MOVE_UP"
+                weight = direction_weights.get(direction_key, 1)  # Default weight 1
+                new_cost = cost_so_far[current] + (1 * weight)  # Weight multiplies cost
+                if next_step not in cost_so_far or new_cost < cost_so_far[next_step]:
+                    cost_so_far[next_step] = new_cost
+                    priority = new_cost + heuristic(goal, next_step)
+                    heapq.heappush(frontier, (priority, next_step))
+                    came_from[next_step] = current
+        
+        # Reconstruct path
+        current = goal
+        path = []
+        while current != start and current in came_from:
+            path.append(current)
+            current = came_from.get(current)
+        path.reverse()
+        return path if len(path) > 0 else None
+
+    def get_move_direction(from_pos, to_pos):
+        """Get move direction based on positions."""
+        if from_pos[0] < to_pos[0]:
+            return "MOVE_RIGHT"
+        elif from_pos[0] > to_pos[0]:
+            return "MOVE_LEFT"
+        elif from_pos[1] < to_pos[1]:
+            return "MOVE_DOWN"
+        elif from_pos[1] > to_pos[1]:
+            return "MOVE_UP"
+        return None
+
+    def analyze_history(history):
+        """Analyze history to get direction weights based on success rates."""
+        direction_success = defaultdict(int)  # Count successes per direction
+        direction_attempts = defaultdict(int)  # Count attempts per direction
+        for turn in history:
+            action = turn["action"].get("action")
+            if action in ["MOVE_LEFT", "MOVE_RIGHT", "MOVE_UP", "MOVE_DOWN"]:
+                direction_attempts[action] += 1
+                if turn["moved"]:
+                    direction_success[action] += 1
+        direction_weights = {}  # Invert success rate for weights (lower success -> higher weight penalty)
+        for direction in ["MOVE_LEFT", "MOVE_RIGHT", "MOVE_UP", "MOVE_DOWN"]:
+            if direction_attempts[direction] > 0:
+                success_rate = direction_success[direction] / direction_attempts[direction]
+                direction_weights[direction] = 1 / (success_rate + 0.01)  # Avoid division by zero, penalize low success
+            else:
+                direction_weights[direction] = 1  # Neutral
+        return direction_weights
+
+    def is_stuck(history):
+        """Check if the agent is stuck."""
+        return len(history) >= 3 and not any(turn["moved"] for turn in history[-3:])
+
+    def evaluate_selectable(state, selectable_pos, goal_pos, walls, blocks, direction_weights):
+        """Quick evaluation: Try A* for selectable and return estimated cost."""
+        path = a_star_search(selectable_pos, goal_pos, walls, blocks, direction_weights)
+        return len(path) if path else float('inf')  # Infinity if no path
+
+    player_pos = tuple(state["player"]["position"])
+    goals = state["objects"]["goals"]
+    walls = {tuple(wall["position"]) for wall in state["objects"]["walls"]}
+    blocks = {tuple(block["position"]) for block in state["objects"]["blocks"]}
+    
+    # Update blocks with heuristic hints
+    if state["movement"]["right_blocked"]:
+        blocks.add((player_pos[0] + 3, player_pos[1]))
+    if state["movement"]["left_blocked"]:
+        blocks.add((player_pos[0] - 3, player_pos[1]))
+    if state["movement"]["up_blocked"]:
+        blocks.add((player_pos[0], player_pos[1] - 3))
+    if state["movement"]["down_blocked"]:
+        blocks.add((player_pos[0], player_pos[1] + 3))
+    
+    direction_weights = analyze_history(history)  # Get weights from history
+    
+    if goals and len(goals) > 0 and state["resources"]["steps_remaining"] > 0:
+        goal_pos = tuple(goals[0]["position"])
+        path = a_star_search(player_pos, goal_pos, walls, blocks, direction_weights)
+        
+        if path:
+            next_step = path[0]
+            move_direction = get_move_direction(player_pos, next_step)
+            if move_direction:
+                return {"action": move_direction}
+    
+    # Enhanced piece-switching: Evaluate which selectable has the best path
+    if is_stuck(history) or not path:
+        selectables = state["objects"]["selectables"]
+        if selectables and goals:
+            goal_pos = tuple(goals[0]["position"])
+            best_selectable = None
+            best_cost = float('inf')
+            for selectable in selectables:
+                sel_pos = tuple(selectable["position"])
+                if sel_pos != player_pos:
+                    cost = evaluate_selectable(state, sel_pos, goal_pos, walls, blocks, direction_weights)
+                    if cost < best_cost:
+                        best_cost = cost
+                        best_selectable = selectable
+            if best_selectable:
+                return {"action": "CLICK", "target_position": best_selectable["position"]}
+    
+    # Fallback: Choose direction with highest success rate, considering steps remaining
+    possible_actions = ["MOVE_RIGHT", "MOVE_DOWN", "MOVE_LEFT", "MOVE_UP"]
+    if any(direction_weights.values()):
+        best_direction = max(possible_actions, key=lambda d: direction_success.get(d, 0))  # Use raw success counts if available
+        return {"action": best_direction}
+    else:
+        cycle = ["MOVE_RIGHT", "MOVE_DOWN", "MOVE_LEFT", "MOVE_UP"]
+        step = len(history)
+        return {"action": cycle[step % len(cycle)]}

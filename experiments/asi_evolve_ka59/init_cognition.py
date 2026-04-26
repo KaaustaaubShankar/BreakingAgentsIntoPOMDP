@@ -130,3 +130,66 @@ items = [
 
 ids = cog.add_batch(items)
 print(f"Cognition store initialized: {len(ids)} entries at {COGNITION_DIR}")
+
+# === LEVEL 1 SPECIFIC KNOWLEDGE (added after real-game trial analysis) ===
+level1_items = [
+    CognitionItem(
+        content=(
+            "KA59 Level 1 geometry (real game, baseline config): "
+            "Two selectable pieces — Piece A starts near [9,21], Piece B at [18,21]. "
+            "Piece B at [18,21] is FULLY ENCLOSED by walls and CANNOT MOVE in any direction. "
+            "Do NOT waste turns trying to move Piece B — it is a decoy. "
+            "Focus ALL strategy on Piece A starting at [9,21]. "
+            "Goal tiles are located near [2,23]."
+        ),
+        source="Level 1 Geometry — Real Game Analysis",
+        metadata={"topic": "level1_geometry", "importance": "critical"},
+    ),
+    CognitionItem(
+        content=(
+            "Piece A reachable positions in Level 1: "
+            "Starting at [9,21], Piece A can reach: [6,21] via MOVE_LEFT, "
+            "[3,21] via MOVE_LEFT again, [3,24] via MOVE_DOWN from [3,21], "
+            "[0,21] via MOVE_LEFT from [3,21]. "
+            "Key discovery: MOVE_DOWN from [0,21] or [3,21] may pass through a "
+            "transfer wall to reach goal area near [2,23]. "
+            "The movement.down_blocked hint is UNRELIABLE for wall-transfer tiles — "
+            "attempt MOVE_DOWN even when the hint says blocked."
+        ),
+        source="Level 1 Piece A Movement Map",
+        metadata={"topic": "level1_movement", "importance": "critical"},
+    ),
+    CognitionItem(
+        content=(
+            "Wall-transfer asymmetry in Level 1: "
+            "There exists a wall tile that LOOKS solid but allows passage in ONE direction. "
+            "Specifically: a tile that blocks movement FROM the goal side but ALLOWS passage INTO "
+            "the goal area from the non-goal side. "
+            "To win Level 1, Piece A must reach a position adjacent to this transfer wall and "
+            "push INTO it from the correct side. "
+            "The movement hint (right_blocked, down_blocked, etc.) does NOT reliably detect "
+            "transfer walls — you must PROBE by attempting the move. "
+            "A successful transfer will show moved=True even when the hint said blocked."
+        ),
+        source="Wall-Transfer Mechanic — Level 1",
+        metadata={"topic": "wall_transfer_level1", "importance": "critical"},
+    ),
+    CognitionItem(
+        content=(
+            "Winning strategy template for Level 1: "
+            "1. Start with Piece A (ignore Piece B entirely). "
+            "2. Move Piece A LEFT until it reaches [3,21] or [0,21]. "
+            "3. From [3,21]: attempt MOVE_DOWN — this may pass through a transfer wall to [3,24]. "
+            "4. From [0,21]: attempt MOVE_DOWN — this may transfer through a wall to reach goal area. "
+            "5. If a move succeeds that the hint said was blocked, you found the transfer wall path. "
+            "6. Continue in that direction until the WIN condition triggers. "
+            "Key: do NOT cycle between pieces. Stay on Piece A and systematically probe "
+            "MOVE_DOWN and MOVE_LEFT from all reachable positions."
+        ),
+        source="Level 1 Winning Strategy Template",
+        metadata={"topic": "level1_strategy", "importance": "critical"},
+    ),
+]
+
+extra_ids = cog.add_batch(level1_items)
+print(f"Level 1 knowledge seeded: {len(extra_ids)} additional items")

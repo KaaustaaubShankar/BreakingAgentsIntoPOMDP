@@ -1,0 +1,51 @@
+"""
+Baseline agent for KA59. Cycles through a fixed action sequence.
+ASI-Evolve will evolve this into something better.
+"""
+
+
+def agent_step(state, history):
+    step = len(history)
+
+    # Try to move toward the goal if we can see one
+    goals = state.get("objects", {}).get("goals", [])
+    player_pos = state.get("player", {}).get("position", [0, 0])
+
+    if goals:
+        gx, gy = goals[0]["position"]
+        px, py = player_pos
+        dx, dy = gx - px, gy - py
+        if abs(dx) >= abs(dy):
+            intended_action = "MOVE_RIGHT" if dx > 0 else "MOVE_LEFT"
+            if (intended_action == "MOVE_RIGHT" and not state.get("movement", {}).get("right_blocked", False)) or \
+               (intended_action == "MOVE_LEFT" and not state.get("movement", {}).get("left_blocked", False)):
+                return {"action": intended_action}
+        else:
+            intended_action = "MOVE_DOWN" if dy > 0 else "MOVE_UP"
+            if (intended_action == "MOVE_DOWN" and not state.get("movement", {}).get("down_blocked", False)) or \
+               (intended_action == "MOVE_UP" and not state.get("movement", {}).get("up_blocked", False)):
+                return {"action": intended_action}
+
+    # First, check if stuck based on history
+    if len(history) >= 3 and all(not entry["moved"] for entry in history[-3:]):
+        selectables = state.get("objects", {}).get("selectables", [])
+        for selectable in selectables:
+            if tuple(selectable["position"]) != tuple(state.get("player", {}).get("position", [0, 0])):
+                return {"action": "CLICK", "target_position": selectable["position"]}
+    
+    # Fallback: cycle through moves, but only use unblocked directions
+    possible_actions = []
+    for action in ["MOVE_RIGHT", "MOVE_DOWN", "MOVE_LEFT", "MOVE_UP"]:
+        if action == "MOVE_RIGHT" and not state.get("movement", {}).get("right_blocked", False):
+            possible_actions.append(action)
+        elif action == "MOVE_LEFT" and not state.get("movement", {}).get("left_blocked", False):
+            possible_actions.append(action)
+        elif action == "MOVE_DOWN" and not state.get("movement", {}).get("down_blocked", False):
+            possible_actions.append(action)
+        elif action == "MOVE_UP" and not state.get("movement", {}).get("up_blocked", False):
+            possible_actions.append(action)
+    
+    if possible_actions:
+        return {"action": possible_actions[step % len(possible_actions)]}
+    else:
+        return {"action": "MOVE_RIGHT"}  # Fallback if all are blocked
