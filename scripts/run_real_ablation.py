@@ -26,13 +26,15 @@ ALL_CONFIGS = {
     "world_hard":     {"world": "HARD", "goal": "EASY", "mechanics": "EASY", "feedback": "EASY"},
     "goal_hard":      {"world": "EASY", "goal": "HARD", "mechanics": "EASY", "feedback": "EASY"},
     "mechanics_hard": {"world": "EASY", "goal": "EASY", "mechanics": "HARD", "feedback": "EASY"},
-    "feedback_hard":  {"world": "EASY", "goal": "EASY", "mechanics": "EASY", "feedback": "HARD"},
+    "mechanics_ooda":   {"world": "EASY", "goal": "EASY", "mechanics": "OODA",   "feedback": "EASY"},
+    "mechanics_ooda_f": {"world": "EASY", "goal": "EASY", "mechanics": "OODA_F", "feedback": "EASY"},
+    "feedback_hard":    {"world": "EASY", "goal": "EASY", "mechanics": "EASY",   "feedback": "HARD"},
 }
 
 RESULTS_DIR = Path(__file__).parents[1] / "results" / "ka59_real_ablation"
 
 
-def run_ablation(provider: str, model: str, n_trials: int, verbose: bool = False) -> dict:
+def run_ablation(provider: str, model: str, n_trials: int, verbose: bool = False, max_turns: int = 200, configs: list | None = None) -> dict:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
     summary = {}
@@ -42,7 +44,8 @@ def run_ablation(provider: str, model: str, n_trials: int, verbose: bool = False
     print(f"Provider: {provider}  Model: {model}  Trials: {n_trials}")
     print(f"{'='*60}\n")
 
-    for cfg_name, cfg in ALL_CONFIGS.items():
+    run_configs = {k: v for k, v in ALL_CONFIGS.items() if configs is None or k in configs}
+    for cfg_name, cfg in run_configs.items():
         wins = 0
         turns_list = []
         levels_list = []
@@ -61,7 +64,7 @@ def run_ablation(provider: str, model: str, n_trials: int, verbose: bool = False
                     config=cfg,
                     provider=provider,
                     model=model,
-                    max_turns=200,
+                    max_turns=max_turns,
                     verbose=verbose,
                 )
                 if result.won:
@@ -137,6 +140,8 @@ if __name__ == "__main__":
     parser.add_argument("--provider", default="xai")
     parser.add_argument("--model", default="grok-3-mini-fast")
     parser.add_argument("--trials", type=int, default=5)
+    parser.add_argument("--max-turns", type=int, default=200, dest="max_turns")
+    parser.add_argument("--configs", nargs="+", default=None)
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
-    run_ablation(args.provider, args.model, args.trials, args.verbose)
+    run_ablation(args.provider, args.model, args.trials, args.verbose, args.max_turns, args.configs)

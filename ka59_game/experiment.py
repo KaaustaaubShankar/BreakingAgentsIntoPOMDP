@@ -31,13 +31,14 @@ from .game_interface import (
     get_structured_state,
 )
 from .llm_client import LLMClient
-from .prompts import FEEDBACK_HARD, UNDERSTANDING_PROMPT, build_system_prompt
+from .prompts import FEEDBACK_HARD, UNDERSTANDING_PROMPT, build_system_prompt, check_discovery
 
 
 RESULTS_DIR = Path("results") / "ka59_game"
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
-DEFAULT_TURNS_PER_LEVEL = 64  # same order of magnitude as env4's bp35 budget
+DEFAULT_TURNS_PER_LEVEL = 64
+STUCK_THRESHOLD = 5  # same order of magnitude as env4's bp35 budget
 MAX_LEVELS_HARD_CAP = 7       # arc_agi reports win_levels=7 for ka59
 
 
@@ -56,6 +57,9 @@ class RunResult:
     invalid_actions: int = 0
     click_actions: int = 0
     moves_blocked: int = 0
+    forced_reframes: int = 0
+    orient_history: list[str] = field(default_factory=list)
+    discovery_turn: Optional[int] = None
 
 
 def save_result(result: RunResult, run_id: Optional[str] = None) -> Path:
@@ -76,6 +80,9 @@ def save_result(result: RunResult, run_id: Optional[str] = None) -> Path:
         "invalid_actions": result.invalid_actions,
         "click_actions": result.click_actions,
         "moves_blocked": result.moves_blocked,
+        "forced_reframes": result.forced_reframes,
+        "orient_history": result.orient_history,
+        "discovery_turn": result.discovery_turn,
         "history": result.history,
     }
     path.write_text(json.dumps(payload, indent=2))
@@ -221,6 +228,9 @@ def run_agent(
     last_action_name = ""
     last_level_index = 0
     turn_in_level = 0
+    position_history: list[tuple] = []
+    consecutive_same_type_count = 0
+    last_action_type_tracked = ""
 
     def log(event: dict[str, Any]) -> None:
         history.append({"timestamp": datetime.now(timezone.utc).isoformat(), **event})
@@ -246,6 +256,26 @@ def run_agent(
                 feedback_text = FEEDBACK_HARD
             action_history.append(f"Turn {turn - 1}: {last_action_name}\n  Result: {feedback_text}")
 
+        # Track position history for stuck detection
+        curr_pos = tuple(curr_state["player"]["position"]) if isinstance(curr_state["player"]["position"], list) else curr_state["player"]["position"]
+        position_history.append(curr_pos)
+        if len(position_history) > STUCK_THRESHOLD:
+            position_history.pop(0)
+
+        # Track consecutive same action-type (CLICK vs MOVE)
+        if last_action_name:
+            last_type = "CLICK" if "CLICK" in last_action_name else "MOVE"
+            if last_type == last_action_type_tracked:
+                consecutive_same_type_count += 1
+            else:
+                consecutive_same_type_count = 1
+                last_action_type_tracked = last_type
+
+        position_stuck = (
+            len(position_history) >= STUCK_THRESHOLD
+            and all(p == position_history[0] for p in position_history)
+        )
+
         if world_level == "HARD":
             obs_block = _build_world_hard_observation(curr_state, turn, max_turns)
         else:
@@ -264,8 +294,26 @@ def run_agent(
         ]
         status_block = "STATUS:\n" + "\n".join(status_lines) + "\n"
 
+        forced_reframe_block = ""
+        if mechanics_level == "OODA_F" and turn > STUCK_THRESHOLD and (
+            position_stuck or consecutive_same_type_count >= STUCK_THRESHOLD
+        ):
+            reason = (
+                f"your position has not changed for {STUCK_THRESHOLD} consecutive turns"
+                if position_stuck
+                else f"you have used {last_action_type_tracked} actions {consecutive_same_type_count} times in a row"
+            )
+            forced_reframe_block = (
+                f"[FORCED REFRAME] No progress: {reason}. "
+                "Your current hypothesis is wrong. ABANDON it. Form a new hypothesis and choose a DIFFERENT action type.\n\n"
+            )
+            result.forced_reframes += 1
+            consecutive_same_type_count = 1
+            log({"type": "forced_reframe", "summary": f"Turn {turn}: forced reframe ({reason})", "turn": turn})
+
         user_prompt = (
-            history_block
+            forced_reframe_block
+            + history_block
             + "\n"
             + status_block
             + "\n"
@@ -296,6 +344,15 @@ def run_agent(
         action_name = str(parsed.get("action", "")).upper().strip()
         reasoning = str(parsed.get("reasoning", "")).strip()
         target_position = parsed.get("target_position")
+
+        # OODA fields
+        observe_text = str(parsed.get("observe", "")).strip()
+        orient_text = str(parsed.get("orient", "")).strip()
+        decide_text = str(parsed.get("decide", "")).strip()
+        if orient_text:
+            result.orient_history.append(orient_text)
+            if result.discovery_turn is None and check_discovery(orient_text):
+                result.discovery_turn = turn
 
         game_action: Optional[GameAction] = None
         action_data: Optional[dict[str, int]] = None
@@ -328,11 +385,14 @@ def run_agent(
 
         log({
             "type": "action",
-            "summary": f"Turn {turn}: {action_name}" + (f" | {reasoning}" if reasoning else ""),
+            "summary": f"Turn {turn}: {action_name}" + (f" | {reasoning or decide_text or orient_text}" if (reasoning or decide_text or orient_text) else ""),
             "turn": turn,
             "action": action_name,
             "target_position": target_position,
             "reasoning": reasoning,
+            "observe": observe_text,
+            "orient": orient_text,
+            "decide": decide_text,
         })
 
         prev_state = curr_state
@@ -402,7 +462,7 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--model", default="google/gemini-2.5-flash")
     p.add_argument("--world", default="EASY", choices=["EASY", "HARD"])
     p.add_argument("--goal", default="EASY", choices=["EASY", "HARD"])
-    p.add_argument("--mechanics", default="EASY", choices=["EASY", "HARD"])
+    p.add_argument("--mechanics", default="EASY", choices=["EASY", "HARD", "OODA", "OODA_F"])
     p.add_argument("--feedback", default="EASY", choices=["EASY", "HARD"])
     p.add_argument("--max-levels", type=int, default=1, help="Default 1 for smoke test speed")
     p.add_argument("--turns-per-level", type=int, default=DEFAULT_TURNS_PER_LEVEL)

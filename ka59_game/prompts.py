@@ -60,6 +60,25 @@ Respond each turn with a JSON object only:
 {"action": "<chosen action>", "target_position": [x, y] if CLICK}\
 """
 
+MECHANICS_OODA_F = """\
+Each turn, respond with a JSON object only using this exact structure:
+{"observe": "<what changed since last turn>", "orient": "<your current hypothesis about how this world works>", "decide": "<what you will do and why>", "action": "<ACTION_NAME>", "target_position": [x, y] if CLICK}
+
+For your first turn, set observe to your initial reading of the state.
+Update your orient hypothesis every turn based on outcomes — if something unexpected happened, revise it.
+Valid actions: MOVE_LEFT, MOVE_RIGHT, MOVE_UP, MOVE_DOWN, CLICK
+
+IMPORTANT: When you see a [FORCED REFRAME] notice in the observation, your recent strategy has not made progress. You MUST: (1) discard your current hypothesis entirely, (2) state a new hypothesis based solely on what you have actually observed, (3) choose a completely different action type than what you have been using."""
+
+MECHANICS_OODA = """\
+Each turn, respond with a JSON object only using this exact structure:
+{"observe": "<what changed since last turn>", "orient": "<your current hypothesis about how this world works>", "decide": "<what you will do and why>", "action": "<ACTION_NAME>", "target_position": [x, y] if CLICK}
+
+For your first turn, set observe to your initial reading of the state.
+Update your orient hypothesis every turn based on outcomes — if something unexpected happened, revise it.
+Valid actions: MOVE_LEFT, MOVE_RIGHT, MOVE_UP, MOVE_DOWN, CLICK\
+"""
+
 FEEDBACK_HARD = "Ok."
 
 UNDERSTANDING_PROMPT = """\
@@ -71,6 +90,19 @@ The run has ended. Please reflect on what you experienced and respond with a JSO
 """
 
 
+DISCOVERY_KEYWORDS = [
+    "transfer", "pass through", "asymmetr", "different for push",
+    "through the wall", "through wall", "push through",
+    "wall allow", "wall let", "boundary allow",
+    "block crosses", "block pass", "pushed block pass",
+]
+
+
+def check_discovery(orient_text: str) -> bool:
+    low = orient_text.lower()
+    return any(kw in low for kw in DISCOVERY_KEYWORDS)
+
+
 def build_system_prompt(goal_level: str, mechanics_level: str) -> str:
     parts: list[str] = []
 
@@ -78,5 +110,12 @@ def build_system_prompt(goal_level: str, mechanics_level: str) -> str:
     if goal_text:
         parts.append(goal_text)
 
-    parts.append(MECHANICS_EASY if mechanics_level == "EASY" else MECHANICS_HARD)
+    if mechanics_level == "OODA_F":
+        parts.append(MECHANICS_OODA_F)
+    elif mechanics_level == "OODA":
+        parts.append(MECHANICS_OODA)
+    elif mechanics_level == "EASY":
+        parts.append(MECHANICS_EASY)
+    else:
+        parts.append(MECHANICS_HARD)
     return "\n\n".join(parts)
