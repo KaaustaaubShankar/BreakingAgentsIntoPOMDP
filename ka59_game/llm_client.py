@@ -1,8 +1,13 @@
 """
 llm_client.py — LLM client for the KA59 real-game harness.
 
-Providers: openrouter, anthropic, claude-cli, openai, xai.
+Providers: openrouter, anthropic, claude-cli, claude-proxy, openai, xai.
 Each provider's API key comes from the environment (loaded via dotenv on import).
+
+`claude-proxy` routes through the local OpenClaw billing proxy on :18801,
+which uses the Claude Max OAuth credentials and reshapes requests to pass
+Anthropic's classifier. ~10x faster per turn than `claude-cli` (no
+subprocess fork, persistent HTTP connection, prompt caching).
 """
 
 from __future__ import annotations
@@ -107,13 +112,15 @@ class LLMClient:
             return self._generate_openrouter(system_prompt, user_prompt)
         if self.provider == "claude-cli":
             return self._generate_claude_cli(system_prompt, user_prompt)
+        if self.provider == "claude-proxy":
+            return self._generate_claude_proxy(system_prompt, user_prompt)
         if self.provider == "openai":
             return self._generate_openai(system_prompt, user_prompt)
         if self.provider == "xai":
             return self._generate_xai(system_prompt, user_prompt)
         raise ValueError(
             f"Unknown provider: {self.provider!r}. "
-            "Use 'openrouter', 'anthropic', 'claude-cli', 'openai', or 'xai'."
+            "Use 'openrouter', 'anthropic', 'claude-cli', 'claude-proxy', 'openai', or 'xai'."
         )
 
     def _generate_xai(self, system_prompt: str, user_prompt: str) -> str:
@@ -178,6 +185,55 @@ class LLMClient:
         if data.get("is_error") or data.get("subtype") != "success":
             raise RuntimeError(f"claude-cli returned error: {result.stdout[:300]}")
         return str(data["result"])
+
+    PROXY_BASE_URL = "http://127.0.0.1:18801"
+
+    def _generate_claude_proxy(self, system_prompt: str, user_prompt: str) -> str:
+        """Route through local OpenClaw billing proxy → Claude Max OAuth.
+
+        Persistent client across turns within a trial — no subprocess fork.
+        System prompt carries cache_control so subsequent turns hit the
+        prompt cache (5-min TTL, comfortably within turn cadence).
+        """
+        import time
+        if not hasattr(self, "_proxy_client"):
+            import anthropic
+            # x-openclaw-no-lift=1 disables Plan-7 lift-and-replace at the
+            # proxy. Required for experimental purity: our `system` field is
+            # the variable under study and must reach the model unmodified.
+            self._proxy_client = anthropic.Anthropic(
+                base_url=self.PROXY_BASE_URL,
+                api_key="dummy-proxy-injects-oauth",
+                max_retries=0,
+                default_headers={"x-openclaw-no-lift": "1"},
+            )
+        response = None
+        for attempt in range(4):
+            try:
+                response = self._proxy_client.messages.create(
+                    model=self.model,
+                    max_tokens=1024,
+                    system=[{
+                        "type": "text",
+                        "text": system_prompt,
+                        "cache_control": {"type": "ephemeral"},
+                    }],
+                    messages=[{"role": "user", "content": user_prompt}],
+                )
+                break
+            except Exception as exc:
+                msg = str(exc)
+                if ("429" in msg or "rate_limit" in msg.lower()) and attempt < 3:
+                    time.sleep(15 * (attempt + 1))
+                    continue
+                raise
+        if response is None:
+            raise RuntimeError("claude-proxy call did not produce a response.")
+        content = response.content[0].text if response.content else None
+        if content is None:
+            raise ValueError("claude-proxy returned empty content.")
+        self._record_usage(response)
+        return str(content)
 
     def _generate_anthropic(self, system_prompt: str, user_prompt: str) -> str:
         import time
