@@ -141,13 +141,15 @@ class LLMClient:
         if not api_key:
             raise ValueError("OPENAI_API_KEY not set.")
         client = _openai.OpenAI(api_key=api_key)
+        # max_completion_tokens covers both reasoning and non-reasoning models;
+        # max_tokens is rejected by gpt-5.x and o-series reasoning models.
         resp = client.chat.completions.create(
             model=self.model,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            max_tokens=1024,
+            max_completion_tokens=4096,
         )
         content = resp.choices[0].message.content
         if content is None:
