@@ -28,7 +28,7 @@ GOAL_HARD = ""
 MECHANICS_EASY = """\
 Game mechanics:
 - Positions are `[x, y]` pixel coordinates. x increases rightward, y increases downward.
-- The grid uses 3 pixels per cell. Every movement action shifts the currently selected piece by exactly one cell (3 pixels) in the chosen direction.
+- The grid uses 3 pixels per cell. Movement actions attempt to shift the currently selected piece in the chosen direction; interactions with certain objects or boundaries may produce unexpected results.
 - Some objects are pushable: if a pushable object is immediately adjacent in the movement direction, a push may occur (the pushable shifts along with the selected piece).
 - Some objects are walls. Walls may block movement in various ways. Not all wall-like boundaries behave identically — you must interact with them to discover their behavior.
 - A level can contain more than one selectable piece. Use `CLICK` with a `target_position` to switch control to another selectable piece at that position. `target_position` must be given in the SAME coordinates as `player.position` and every entry in `objects` — i.e. the pixel/grid coordinates shown in the state dict, NOT cell indices from the semantic_grid.
@@ -90,17 +90,44 @@ The run has ended. Please reflect on what you experienced and respond with a JSO
 """
 
 
-DISCOVERY_KEYWORDS = [
-    "transfer", "pass through", "asymmetr", "different for push",
-    "through the wall", "through wall", "push through",
-    "wall allow", "wall let", "boundary allow",
-    "block crosses", "block pass", "pushed block pass",
+import re as _re
+
+# Discovery = model verbalizes that PUSH/MOVE (not CLICK) causes a block/piece
+# to pass through or transfer across a wall. CLICK-selection language is a common
+# false positive source and is explicitly vetoed.
+_DISCOVERY_PATTERNS = [
+    # Unambiguous push-through phrases
+    _re.compile(r"through the wall", _re.I),
+    _re.compile(r"push(?:ed|ing)? through", _re.I),
+    _re.compile(r"different for push", _re.I),
+    # Wall explicitly described as passable/permeable ("unpassable" / "impassable" excluded)
+    _re.compile(r"wall[^.]{0,60}\b(?:is|are|may\s+be|could\s+be|might\s+be|appears?\s+to\s+be)\s+passable", _re.I),
+    _re.compile(r"wall[^.]{0,60}permeable", _re.I),
+    _re.compile(r"wall[^.]{0,30}not\s+(?:solid|blocking|blocked|impassable)", _re.I),
+    _re.compile(r"see\s+if\s+the\s+wall\s+is\s+passable", _re.I),
+    # Asymmetry in wall/push behavior
+    _re.compile(r"(?:wall|push).{0,40}asymmetr", _re.I),
+    _re.compile(r"asymmetr.{0,40}(?:wall|push)", _re.I),
+    # Explicit block-crosses-wall in MOVE/push context (not CLICK)
+    _re.compile(r"(?:move|push).{0,60}block.{0,40}(?:cross|pass).{0,20}wall", _re.I),
+    _re.compile(r"pushed block pass", _re.I),
+]
+
+# CLICK-selection language and negations: these veto a match even if a discovery pattern fires.
+_VETO_PATTERNS = [
+    _re.compile(r"click.{0,80}(?:teleport|transfer|cross|jump).{0,60}wall", _re.I),
+    _re.compile(r"(?:teleport|transfer|jump).{0,60}click", _re.I),
+    _re.compile(r"select.{0,60}transfer", _re.I),
+    _re.compile(r"transfer.{0,60}select", _re.I),
+    # Negation: "no path through the wall" / "cannot go through the wall"
+    _re.compile(r"(?:no\s+(?:path|way)|cannot|can.t|unable)\s*.{0,30}through\s+the\s+walls?", _re.I),
 ]
 
 
 def check_discovery(orient_text: str) -> bool:
-    low = orient_text.lower()
-    return any(kw in low for kw in DISCOVERY_KEYWORDS)
+    if any(vp.search(orient_text) for vp in _VETO_PATTERNS):
+        return False
+    return any(p.search(orient_text) for p in _DISCOVERY_PATTERNS)
 
 
 def build_system_prompt(goal_level: str, mechanics_level: str) -> str:
