@@ -17,9 +17,10 @@ load_dotenv()
 class LLMClient:
     OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
-    def __init__(self, provider: str, model: str) -> None:
+    def __init__(self, provider: str, model: str, reasoning_effort: str | None = None) -> None:
         self.provider = provider.lower()
         self.model = model
+        self.reasoning_effort = reasoning_effort.lower().strip() if reasoning_effort else None
         self.reset_usage()
 
     def reset_usage(self) -> None:
@@ -83,6 +84,7 @@ class LLMClient:
 
         response = self._client().chat.completions.create(
             model=self.model,
+            reasoning_effort=self.reasoning_effort,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
@@ -105,6 +107,7 @@ class LLMClient:
 
         response = self._client().chat.completions.create(
             model=self.model,
+            reasoning_effort=self.reasoning_effort,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {
