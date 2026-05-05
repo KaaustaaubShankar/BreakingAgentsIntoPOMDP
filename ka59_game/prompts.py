@@ -18,8 +18,8 @@ from __future__ import annotations
 
 GOAL_EASY = """\
 Your goal is to complete the KA59 puzzle game by progressing through all of its levels.
-Each level presents a grid with obstacles, selectable pieces, and goal tile(s) marked `+` in the semantic grid.
-You win a level by getting a pushable object onto the goal tile(s), or by satisfying whatever success condition the engine reports as WIN.
+Each level presents a grid with obstacles, one or more selectable pieces, and one or more goal tiles marked `+` in the semantic grid.
+You win a level by placing each selectable piece onto a goal tile. If a level has multiple goal tiles, EVERY goal must be occupied by a selectable piece simultaneously for the engine to report WIN.
 Once the run reports WIN, the whole game is won. Use actions efficiently; the step budget per level is finite.\
 """
 

@@ -25,9 +25,10 @@ load_dotenv()
 class LLMClient:
     OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
-    def __init__(self, provider: str, model: str) -> None:
+    def __init__(self, provider: str, model: str, reasoning_effort: str | None = None) -> None:
         self.provider = provider.lower()
         self.model = model
+        self.reasoning_effort = reasoning_effort  # None | 'minimal' | 'low' | 'medium' | 'high'
         self.reset_usage()
 
     def reset_usage(self) -> None:
@@ -82,7 +83,13 @@ class LLMClient:
         api_key = os.environ.get("OPENROUTER_API_KEY")
         if not api_key:
             raise ValueError("OPENROUTER_API_KEY not set.")
-        return openai.OpenAI(base_url=self.OPENROUTER_BASE_URL, api_key=api_key)
+        if not hasattr(self, "_or_client"):
+            self._or_client = openai.OpenAI(
+                base_url=self.OPENROUTER_BASE_URL,
+                api_key=api_key,
+                timeout=120.0,
+            )
+        return self._or_client
 
     def _anthropic_client(self):
         import anthropic
@@ -150,7 +157,7 @@ class LLMClient:
         client = _openai.OpenAI(api_key=api_key)
         # max_completion_tokens covers both reasoning and non-reasoning models;
         # max_tokens is rejected by gpt-5.x and o-series reasoning models.
-        resp = client.chat.completions.create(
+        kwargs: Dict[str, Any] = dict(
             model=self.model,
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -158,6 +165,9 @@ class LLMClient:
             ],
             max_completion_tokens=4096,
         )
+        if self.reasoning_effort:
+            kwargs["reasoning_effort"] = self.reasoning_effort
+        resp = client.chat.completions.create(**kwargs)
         content = resp.choices[0].message.content
         if content is None:
             raise ValueError("OpenAI returned empty content.")
@@ -273,15 +283,26 @@ class LLMClient:
 
     def _generate_openrouter(self, system_prompt: str, user_prompt: str) -> str:
         import time
+        # Cap generation. Without this, reasoning models on OpenRouter (Grok,
+        # gpt-5.x with medium/high effort) can emit multi-thousand-token
+        # reasoning chains per turn and stall a trial for many minutes. Direct
+        # xAI calls below already cap at 1024; we match that here.
+        kwargs: Dict[str, Any] = dict(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            max_tokens=1024,
+        )
+        if self.reasoning_effort:
+            # OpenRouter unified reasoning param works for all supported
+            # providers (OpenAI gpt-5.x, xAI Grok, Anthropic). Pass via
+            # extra_body since OpenAI Python SDK has no top-level `reasoning`.
+            kwargs["extra_body"] = {"reasoning": {"effort": self.reasoning_effort}}
         for attempt in range(4):
             try:
-                response = self._openrouter_client().chat.completions.create(
-                    model=self.model,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                )
+                response = self._openrouter_client().chat.completions.create(**kwargs)
                 self._record_usage(response)
                 content = response.choices[0].message.content
                 if content is None:
