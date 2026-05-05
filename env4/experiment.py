@@ -28,7 +28,8 @@ from prompts import FEEDBACK_HARD, UNDERSTANDING_PROMPT, build_system_prompt
 RESULTS_DIR = Path("results")
 RESULTS_DIR.mkdir(exist_ok=True)
 
-TURNS_PER_LEVEL = 128
+TURNS_PER_LEVEL = 50
+LEVEL_ATTEMPTS = 2
 
 ACTION_MAP: dict[str, GameAction] = {
     "MOVE_LEFT": GameAction.ACTION3,
@@ -47,6 +48,7 @@ class RunResult:
     levels_completed: int
     provider: str = ""
     model: str = ""
+    reasoning_effort: str | None = None
     vision: bool = False
     errors: list[str] = field(default_factory=list)
     history: list[dict[str, Any]] = field(default_factory=list)
@@ -73,6 +75,7 @@ def save_result(result: RunResult, run_id: Optional[str] = None) -> Path:
         "levels_completed": result.levels_completed,
         "provider": result.provider,
         "model": result.model,
+        "reasoning_effort": result.reasoning_effort,
         "timestamp": result.timestamp,
         "errors": result.errors,
         "understanding": result.understanding,
@@ -283,6 +286,7 @@ def run_agent(
     feedback_level: str = "EASY",
     provider: str = "openrouter",
     model: str = "meta-llama/llama-3.3-70b-instruct:free",
+    reasoning_effort: str | None = None,
     vision: bool = False,
     turns_per_level: int = TURNS_PER_LEVEL,
     max_levels: Optional[int] = None,
@@ -301,6 +305,7 @@ def run_agent(
         "mechanics": mechanics_level,
         "feedback": feedback_level,
         "world_easy_format": world_easy_format,
+        "reasoning_effort": reasoning_effort,
     }
     result = RunResult(
         config=config,
@@ -309,11 +314,12 @@ def run_agent(
         levels_completed=0,
         provider=provider,
         model=model,
+        reasoning_effort=reasoning_effort,
         vision=vision,
         timestamp=datetime.now(timezone.utc).isoformat(),
     )
 
-    client = LLMClient(provider=provider, model=model)
+    client = LLMClient(provider=provider, model=model, reasoning_effort=reasoning_effort)
     system_prompt = build_system_prompt(goal_level, mechanics_level)
 
     env = _make_env()
@@ -323,14 +329,12 @@ def run_agent(
         return result
 
     levels_to_play = max_levels if max_levels is not None else int(frame_data.win_levels)
-    max_turns = levels_to_play * turns_per_level
 
     history: list[dict[str, Any]] = []
     action_history: list[str] = []
-    prev_state: Optional[dict[str, Any]] = None
-    last_action_name = ""
-    recent_actions: list[str] = []
     history_block = ""
+    global_turn = 0
+    stop_run = False
 
     def log(event: dict[str, Any]) -> None:
         history.append({"timestamp": datetime.now(timezone.utc).isoformat(), **event})
@@ -339,165 +343,261 @@ def run_agent(
 
     log({"type": "game_start", "summary": "Episode started.", "config": config})
 
-    for turn in range(1, max_turns + 1):
-        result.turns = turn
-        curr_state = get_structured_state(env, frame_data)
-        use_vision = world_level == "HARD" and vision and bool(frame_data.frame)
-
-        if prev_state is not None:
-            if feedback_level == "EASY":
-                feedback_text = build_feedback_easy(prev_state, curr_state, last_action_name)
-            else:
-                feedback_text = FEEDBACK_HARD
-            action_history.append(f"Turn {turn - 1}: {last_action_name}\n  Result: {feedback_text}")
-
-        if prev_state is not None and prev_state["player"]["gravity"] != curr_state["player"]["gravity"]:
-            result.gravity_flips += 1
-
-        if world_level == "EASY":
-            if world_easy_format == "v2":
-                obs_block = _build_world_easy_v2_observation(curr_state, turn, max_turns)
-            else:
-                obs_block = _build_world_easy_v1_observation(curr_state, turn, max_turns)
-        elif use_vision:
-            obs_block = f"Turn {turn}/{max_turns}. The current BP35 frame is shown in the image."
-        else:
-            ascii_grid = frame_to_ascii(frame_data.frame[-1]) if frame_data.frame else ""
-            obs_block = f"CURRENT FRAME (turn {turn}/{max_turns}):\n{ascii_grid}"
-            if turn == 1:
-                obs_block += f"\n\nCharacter reference: {ASCII_LEGEND}"
-
-        recent_history = action_history[-10:]
-        history_block = (
-            "RECENT ACTIONS (last 10 turns):\n" + "\n".join(recent_history) + "\n"
-            if recent_history else ""
-        )
-
-        status_lines = [
-            f"Position: {curr_state['player']['position']}",
-            f"Gravity: {curr_state['player']['gravity']}",
-            f"Steps remaining: {curr_state['resources']['steps_remaining']}",
-            f"Goals: {curr_state['objects']['goals']}",
-        ]
-        if curr_state["movement"]["left_blocked"]:
-            status_lines.append("LEFT is currently blocked.")
-        if curr_state["movement"]["right_blocked"]:
-            status_lines.append("RIGHT is currently blocked.")
-        clickable_positions = [item["position"] for item in curr_state["objects"]["clickable_tiles"]]
-        if clickable_positions:
-            status_lines.append(f"Clickable tiles: {clickable_positions}")
-        status_block = "STATUS:\n" + "\n".join(status_lines) + "\n"
-
-        warnings: list[str] = []
-        if len(recent_actions) >= 8 and len(set(recent_actions[-8:])) == 1:
-            warnings.append(
-                f"WARNING: You repeated {recent_actions[-1]} for 8 turns. Try a different move or click."
-            )
-
-        user_prompt = (
-            ("\n".join(warnings) + "\n" if warnings else "")
-            + history_block
-            + "\n"
-            + status_block
-            + "\n"
-            + obs_block
-            + '\n\nRespond with a single JSON object only: {"reasoning": "<plan>", "action": "MOVE_LEFT"}'
-        )
-
-        retry_prompt = (
-            "You forgot valid JSON. Reply with ONLY one JSON object.\n"
-            'Examples:\n'
-            '{"reasoning": "I should move right to line up with the goal", "action": "MOVE_RIGHT"}\n'
-            '{"reasoning": "I should flip gravity", "action": "CLICK", "target_position": [4, 10]}\n'
-            '{"reasoning": "This path is wrong", "action": "UNDO"}'
-        )
-
-        try:
-            if use_vision:
-                b64 = frame_to_base64_png(frame_data.frame[-1])
-                reply = client.generate_with_image(system_prompt, user_prompt, b64)
-            else:
-                reply = client.generate(system_prompt, user_prompt)
-            try:
-                parsed = client.parse_json(reply)
-            except ValueError:
-                reply = client.generate(system_prompt, retry_prompt)
-                parsed = client.parse_json(reply)
-        except Exception as exc:
-            err = f"Turn {turn}: LLM/parse error — {exc}"
-            result.errors.append(err)
-            log({"type": "error", "summary": err})
-            continue
-
-        action_name = str(parsed.get("action", "")).upper().strip()
-        reasoning = str(parsed.get("reasoning", "")).strip()
-        target_position = parsed.get("target_position")
-
-        raw_action: GameAction | None = None
-        raw_data: Optional[dict[str, int]] = None
-        if action_name in ACTION_MAP:
-            raw_action = ACTION_MAP[action_name]
-            if action_name == "UNDO":
-                result.undos += 1
-        elif action_name == "CLICK":
-            if not isinstance(target_position, list) or len(target_position) != 2:
-                result.invalid_actions += 1
-                err = f"Turn {turn}: CLICK missing target_position"
-                result.errors.append(err)
-                log({"type": "invalid_action", "summary": err, "raw_reply": reply})
-                continue
-            try:
-                raw_action = GameAction.ACTION6
-                raw_data = _build_click_data(env, [int(target_position[0]), int(target_position[1])])
-                result.click_actions += 1
-            except Exception as exc:
-                result.invalid_actions += 1
-                err = f"Turn {turn}: invalid click target {target_position!r} — {exc}"
-                result.errors.append(err)
-                log({"type": "invalid_action", "summary": err, "raw_reply": reply})
-                continue
-        else:
-            result.invalid_actions += 1
-            err = f"Turn {turn}: unknown action '{action_name}'"
-            result.errors.append(err)
-            log({"type": "invalid_action", "summary": err, "raw_reply": reply})
-            continue
+    while not stop_run and frame_data.levels_completed < levels_to_play:
+        level_start_completed = int(frame_data.levels_completed)
+        current_level = level_start_completed + 1
+        level_progressed = False
 
         log(
             {
-                "type": "action",
-                "summary": f"Turn {turn}: {action_name}" + (f" | {reasoning}" if reasoning else ""),
-                "turn": turn,
-                "action": action_name,
-                "target_position": target_position,
-                "reasoning": reasoning,
-                "state_before": curr_state,
+                "type": "level_start",
+                "summary": f"Level {current_level}/{levels_to_play} started.",
+                "level": current_level,
             }
         )
 
-        prev_state = curr_state
-        last_action_name = action_name if action_name != "CLICK" else f"CLICK {target_position}"
-        recent_actions.append(last_action_name)
+        for level_attempt in range(1, LEVEL_ATTEMPTS + 1):
+            attempt_turn = 0
+            prev_state: Optional[dict[str, Any]] = None
+            last_action_name = ""
+            recent_actions: list[str] = []
 
-        frame_data = _safe_env_step(env, raw_action, data=raw_data)
-        if frame_data is None:
-            result.errors.append(f"Turn {turn}: env.step returned None.")
+            action_history.append(
+                f"Level {current_level} attempt {level_attempt}/{LEVEL_ATTEMPTS} started."
+            )
+
+            while attempt_turn < turns_per_level:
+                global_turn += 1
+                attempt_turn += 1
+                result.turns = global_turn
+                curr_state = get_structured_state(env, frame_data)
+                use_vision = world_level == "HARD" and vision and bool(frame_data.frame)
+
+                if prev_state is not None:
+                    if feedback_level == "EASY":
+                        feedback_text = build_feedback_easy(prev_state, curr_state, last_action_name)
+                    else:
+                        feedback_text = FEEDBACK_HARD
+                    action_history.append(
+                        f"Turn {global_turn - 1}: {last_action_name}\n  Result: {feedback_text}"
+                    )
+
+                if prev_state is not None and prev_state["player"]["gravity"] != curr_state["player"]["gravity"]:
+                    result.gravity_flips += 1
+
+                if world_level == "EASY":
+                    if world_easy_format == "v2":
+                        obs_block = _build_world_easy_v2_observation(curr_state, attempt_turn, turns_per_level)
+                    else:
+                        obs_block = _build_world_easy_v1_observation(curr_state, attempt_turn, turns_per_level)
+                elif use_vision:
+                    obs_block = (
+                        f"Level {current_level}/{levels_to_play}, attempt {level_attempt}/{LEVEL_ATTEMPTS}, "
+                        f"turn {attempt_turn}/{turns_per_level}. The current BP35 frame is shown in the image."
+                    )
+                else:
+                    ascii_grid = frame_to_ascii(frame_data.frame[-1]) if frame_data.frame else ""
+                    obs_block = (
+                        f"CURRENT FRAME (level {current_level}/{levels_to_play}, attempt {level_attempt}/{LEVEL_ATTEMPTS}, "
+                        f"turn {attempt_turn}/{turns_per_level}):\n{ascii_grid}"
+                    )
+                    if global_turn == 1:
+                        obs_block += f"\n\nCharacter reference: {ASCII_LEGEND}"
+
+                recent_history = action_history[-10:]
+                history_block = (
+                    "RECENT ACTIONS (last 10 turns):\n" + "\n".join(recent_history) + "\n"
+                    if recent_history
+                    else ""
+                )
+
+                status_lines = [
+                    f"Level: {current_level}/{levels_to_play}",
+                    f"Attempt: {level_attempt}/{LEVEL_ATTEMPTS}",
+                    f"Turns remaining in attempt: {turns_per_level - attempt_turn}",
+                    f"Position: {curr_state['player']['position']}",
+                    f"Gravity: {curr_state['player']['gravity']}",
+                    f"Steps remaining: {curr_state['resources']['steps_remaining']}",
+                    f"Goals: {curr_state['objects']['goals']}",
+                ]
+                if curr_state["movement"]["left_blocked"]:
+                    status_lines.append("LEFT is currently blocked.")
+                if curr_state["movement"]["right_blocked"]:
+                    status_lines.append("RIGHT is currently blocked.")
+                clickable_positions = [item["position"] for item in curr_state["objects"]["clickable_tiles"]]
+                if clickable_positions:
+                    status_lines.append(f"Clickable tiles: {clickable_positions}")
+                status_block = "STATUS:\n" + "\n".join(status_lines) + "\n"
+
+                warnings: list[str] = []
+                if len(recent_actions) >= 8 and len(set(recent_actions[-8:])) == 1:
+                    warnings.append(
+                        f"WARNING: You repeated {recent_actions[-1]} for 8 turns. Try a different move or click."
+                    )
+
+                user_prompt = (
+                    ("\n".join(warnings) + "\n" if warnings else "")
+                    + history_block
+                    + "\n"
+                    + status_block
+                    + "\n"
+                    + obs_block
+                    + '\n\nRespond with a single JSON object only: {"reasoning": "<plan>", "action": "MOVE_LEFT"}'
+                )
+
+                retry_prompt = (
+                    "You forgot valid JSON. Reply with ONLY one JSON object.\n"
+                    'Examples:\n'
+                    '{"reasoning": "I should move right to line up with the goal", "action": "MOVE_RIGHT"}\n'
+                    '{"reasoning": "I should flip gravity", "action": "CLICK", "target_position": [4, 10]}\n'
+                    '{"reasoning": "This path is wrong", "action": "UNDO"}'
+                )
+
+                try:
+                    if use_vision:
+                        b64 = frame_to_base64_png(frame_data.frame[-1])
+                        reply = client.generate_with_image(system_prompt, user_prompt, b64)
+                    else:
+                        reply = client.generate(system_prompt, user_prompt)
+                    try:
+                        parsed = client.parse_json(reply)
+                    except ValueError:
+                        reply = client.generate(system_prompt, retry_prompt)
+                        parsed = client.parse_json(reply)
+                except Exception as exc:
+                    err = f"Level {current_level} attempt {level_attempt} turn {attempt_turn}: LLM/parse error — {exc}"
+                    result.errors.append(err)
+                    log({"type": "error", "summary": err})
+                    continue
+
+                action_name = str(parsed.get("action", "")).upper().strip()
+                reasoning = str(parsed.get("reasoning", "")).strip()
+                target_position = parsed.get("target_position")
+
+                raw_action: GameAction | None = None
+                raw_data: Optional[dict[str, int]] = None
+                if action_name in ACTION_MAP:
+                    raw_action = ACTION_MAP[action_name]
+                    if action_name == "UNDO":
+                        result.undos += 1
+                elif action_name == "CLICK":
+                    if not isinstance(target_position, list) or len(target_position) != 2:
+                        result.invalid_actions += 1
+                        err = (
+                            f"Level {current_level} attempt {level_attempt} turn {attempt_turn}: "
+                            "CLICK missing target_position"
+                        )
+                        result.errors.append(err)
+                        log({"type": "invalid_action", "summary": err, "raw_reply": reply})
+                        continue
+                    try:
+                        raw_action = GameAction.ACTION6
+                        raw_data = _build_click_data(env, [int(target_position[0]), int(target_position[1])])
+                        result.click_actions += 1
+                    except Exception as exc:
+                        result.invalid_actions += 1
+                        err = (
+                            f"Level {current_level} attempt {level_attempt} turn {attempt_turn}: "
+                            f"invalid click target {target_position!r} — {exc}"
+                        )
+                        result.errors.append(err)
+                        log({"type": "invalid_action", "summary": err, "raw_reply": reply})
+                        continue
+                else:
+                    result.invalid_actions += 1
+                    err = f"Level {current_level} attempt {level_attempt} turn {attempt_turn}: unknown action '{action_name}'"
+                    result.errors.append(err)
+                    log({"type": "invalid_action", "summary": err, "raw_reply": reply})
+                    continue
+
+                log(
+                    {
+                        "type": "action",
+                        "summary": (
+                            f"Level {current_level} attempt {level_attempt} turn {attempt_turn}: {action_name}"
+                            + (f" | {reasoning}" if reasoning else "")
+                        ),
+                        "turn": global_turn,
+                        "level": current_level,
+                        "attempt": level_attempt,
+                        "attempt_turn": attempt_turn,
+                        "action": action_name,
+                        "target_position": target_position,
+                        "reasoning": reasoning,
+                        "state_before": curr_state,
+                    }
+                )
+
+                prev_state = curr_state
+                last_action_name = action_name if action_name != "CLICK" else f"CLICK {target_position}"
+                recent_actions.append(last_action_name)
+
+                frame_data = _safe_env_step(env, raw_action, data=raw_data)
+                if frame_data is None:
+                    result.errors.append(
+                        f"Level {current_level} attempt {level_attempt} turn {attempt_turn}: env.step returned None."
+                    )
+                    stop_run = True
+                    break
+
+                result.levels_completed = frame_data.levels_completed
+                if frame_data.levels_completed > level_start_completed:
+                    level_progressed = True
+                    log(
+                        {
+                            "type": "level_complete",
+                            "summary": (
+                                f"Level {current_level} completed after {global_turn} turns."
+                            ),
+                            "level": current_level,
+                            "levels_completed": frame_data.levels_completed,
+                        }
+                    )
+                    if frame_data.levels_completed >= levels_to_play or frame_data.state.name == "WIN":
+                        result.won = True
+                        log(
+                            {
+                                "type": "win",
+                                "summary": f"Reached {levels_to_play} level(s) after {global_turn} turns.",
+                            }
+                        )
+                        stop_run = True
+                    break
+
+                if frame_data.state.name == "GAME_OVER":
+                    break
+
+            if stop_run or result.won or level_progressed:
+                break
+
+            failure_summary = (
+                f"Level {current_level} attempt {level_attempt}/{LEVEL_ATTEMPTS} failed after {attempt_turn} turns."
+            )
+            if level_attempt < LEVEL_ATTEMPTS:
+                log({"type": "game_over", "summary": failure_summary + " Restarting the same level."})
+                action_history.append(
+                    failure_summary
+                    + " Game over. Restarting the same level and keeping this failure in context."
+                )
+                frame_data = _safe_env_step(env, GameAction.RESET)
+                if frame_data is None:
+                    result.errors.append(
+                        f"Level {current_level} attempt {level_attempt}: env.reset returned None."
+                    )
+                    stop_run = True
+                    break
+                continue
+
+            log({"type": "game_over", "summary": failure_summary + " No attempts remaining."})
+            action_history.append(failure_summary + " Game over. No attempts remaining.")
+            stop_run = True
             break
 
-        result.levels_completed = frame_data.levels_completed
-        if frame_data.state.name == "WIN":
-            result.won = True
-            log({"type": "win", "summary": f"WIN after {turn} turns."})
+        if stop_run:
             break
-        if frame_data.state.name == "GAME_OVER":
-            log({"type": "game_over", "summary": f"GAME_OVER after {turn} turns."})
-            break
-        if max_levels is not None and frame_data.levels_completed >= max_levels:
-            result.won = True
-            log({"type": "win", "summary": f"Reached {max_levels} level(s) after {turn} turns."})
-            break
-    else:
-        log({"type": "timeout", "summary": f"Turn budget ({max_turns}) exhausted."})
+
+    if not result.won and not stop_run and frame_data.levels_completed < levels_to_play:
+        log({"type": "timeout", "summary": f"Turn budget ({global_turn}) exhausted."})
 
     understanding_prompt = (history_block if history_block else "") + "\n" + UNDERSTANDING_PROMPT
     try:

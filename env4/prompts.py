@@ -8,7 +8,8 @@ GOAL_EASY = """\
 Your goal is to finish the current BP35 level and then continue until the game is won.
 In each level, you need to reach the goal gem tile marked `+`.
 Avoid spike tiles: landing on a spike ends the run.
-There is a step budget each level. If you spend too many actions, the level ends in failure.
+Each level gives you 2 attempts, and each attempt has 50 turns.
+If an attempt fails, the level will be restarted and the failure will be appended to the recent context.
 Complete levels efficiently.\
 """
 
@@ -27,6 +28,10 @@ Important tile types:
 - `u` / `v` = spikes. Landing on them loses immediately.
 - `x` = breakable block. Clicking it removes it.
 - `o`, `m`, `w` = safe support tiles you can land on.
+
+Turn budget:
+- You have 50 turns per attempt and 2 attempts per level.
+- If an attempt fails, the same level will be restored and the failure will stay in the context window.
 
 Fall-destination preview:
 - The structured state includes `movement.left_landing` and `movement.right_landing`: where you will end up (after gravity fully acts) if you move left or right this turn.
