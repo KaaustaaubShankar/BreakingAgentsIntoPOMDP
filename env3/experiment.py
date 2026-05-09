@@ -58,7 +58,7 @@ from prompts import (
 RESULTS_DIR = Path("results")
 RESULTS_DIR.mkdir(exist_ok=True)
 
-TURNS_PER_LEVEL = 100
+TURNS_PER_LEVEL = 50
 
 ACTION_MAP: dict[str, GameAction] = {
     "MOVE_NORTH": GameAction.ACTION1,
