@@ -125,12 +125,14 @@ class LLMClient:
             return self._generate_openai(system_prompt, user_prompt)
         if self.provider == "xai":
             return self._generate_xai(system_prompt, user_prompt)
+        if self.provider == "qwen-mlx":
+            return self._generate_qwen_mlx(system_prompt, user_prompt)
         if self.provider == "qwen-local":
             return self._generate_qwen_local(system_prompt, user_prompt)
         raise ValueError(
             f"Unknown provider: {self.provider!r}. "
             "Use 'openrouter', 'anthropic', 'claude-cli', 'claude-proxy', "
-            "'openai', 'xai', or 'qwen-local'."
+            "'openai', 'xai', 'qwen-local', or 'qwen-mlx'."
         )
 
     def _generate_xai(self, system_prompt: str, user_prompt: str) -> str:
@@ -161,6 +163,35 @@ class LLMClient:
             sys.path.insert(0, repo_root)
         from qwen_local import generate as _qwen_generate
         text, input_tokens, output_tokens = _qwen_generate(
+            self.model, system_prompt, user_prompt, self.reasoning_effort
+        )
+
+        class _U:
+            pass
+
+        _U.input_tokens = input_tokens
+        _U.output_tokens = output_tokens
+        _U.total_tokens = input_tokens + output_tokens
+
+        class _R:
+            usage = _U()
+
+        self._record_usage(_R())
+        return text
+
+    def _generate_qwen_mlx(self, system_prompt: str, user_prompt: str) -> str:
+        """MLX-based local Qwen inference (Apple Silicon only).
+
+        Delegates to top-level qwen_mlx module so the model cache is shared
+        across ka59_game / env3 / env4 within one process. Mirrors the
+        transformers-based qwen-local provider, but uses mlx_lm instead.
+        """
+        import sys, pathlib
+        repo_root = str(pathlib.Path(__file__).resolve().parents[1])
+        if repo_root not in sys.path:
+            sys.path.insert(0, repo_root)
+        from qwen_mlx import generate as _qwen_mlx_generate
+        text, input_tokens, output_tokens = _qwen_mlx_generate(
             self.model, system_prompt, user_prompt, self.reasoning_effort
         )
 
