@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 import arc_agi
 from arc_agi import OperationMode
@@ -25,7 +26,10 @@ LEGEND = (
 
 
 def _make_env():
-    return arc_agi.Arcade(operation_mode=OperationMode.OFFLINE).make("ka59", render_mode=None)
+    env_dir = str(Path(__file__).parents[1] / "environment_files")
+    return arc_agi.Arcade(
+        operation_mode=OperationMode.OFFLINE, environments_dir=env_dir
+    ).make("ka59", render_mode=None)
 
 
 def _render(state: dict, prev: dict | None, last_action: str | None) -> None:
