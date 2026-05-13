@@ -20,15 +20,20 @@ from typing import Any
 _MLX_CACHE: dict[str, Any] = {}
 
 # Same shape as qwen_local._MAX_NEW_TOKENS — proportional budget per
-# reasoning level. None disables thinking; non-None enables it and
-# scales the token budget so the model has room to think.
+# reasoning level. The runtime ablation script passes the *string* "none"
+# while the rest of the harness uses Python None for the same meaning;
+# both must disable thinking and use the small budget.
 _MAX_NEW_TOKENS = {
     None: 1024,
+    "none": 1024,
     "minimal": 1536,
     "low": 2560,
     "medium": 4608,
     "high": 8704,
+    "xhigh": 16896,
 }
+
+_NO_THINKING = {None, "none"}
 
 
 def _load(model_name: str) -> Any:
@@ -55,7 +60,7 @@ def generate(
     from mlx_lm import generate as mlx_generate
 
     model, tokenizer = _load(model_name)
-    enable_thinking = reasoning_effort is not None
+    enable_thinking = reasoning_effort not in _NO_THINKING
     max_tokens = _MAX_NEW_TOKENS.get(reasoning_effort, 1024)
 
     prompt = tokenizer.apply_chat_template(
