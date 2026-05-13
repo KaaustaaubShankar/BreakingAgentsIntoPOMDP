@@ -28,7 +28,7 @@ PROMPT = (
 )
 SYSTEM = "You are a calculator. Answer with just digits."
 
-LEVELS = [None, "minimal", "low", "medium", "high"]
+LEVELS = [None, "none", "minimal", "low", "medium", "high", "xhigh"]
 MODEL = "openai/gpt-5.2"
 
 
