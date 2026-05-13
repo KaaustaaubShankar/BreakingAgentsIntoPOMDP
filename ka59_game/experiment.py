@@ -9,6 +9,11 @@ Differences vs ka59_ref/experiment.py (faithful sim):
 - Multi-level progression (up to win_levels, default 7) instead of one scenario.
 - CLICK action (ACTION6) is the SELECT analog — pick a selectable piece by
   target_position in cell coordinates.
+
+Supports two environments via the env_id argument (and --env CLI flag):
+- "ka59"       : canonical 7-level game (default; n=30+ baseline runs floor-effected)
+- "ka59simple" : single-goal fork built on 2026-04-30 to escape the floor effect
+                 while preserving all four ablation axes
 """
 
 from __future__ import annotations
@@ -34,12 +39,19 @@ from .llm_client import LLMClient
 from .prompts import FEEDBACK_HARD, UNDERSTANDING_PROMPT, build_system_prompt, check_discovery
 
 
-RESULTS_DIR = Path("results") / "ka59_game"
-RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-
+DEFAULT_ENV_ID = "ka59"
 DEFAULT_TURNS_PER_LEVEL = 64
 STUCK_THRESHOLD = 5  # same order of magnitude as env4's bp35 budget
 MAX_LEVELS_HARD_CAP = 7       # arc_agi reports win_levels=7 for ka59
+
+
+def _results_dir_for(env_id: str) -> Path:
+    # ka59 keeps the historical "ka59_game" directory; forks (ka59simple) get
+    # their own sibling so per-trial JSONs don't mix across environments.
+    folder = "ka59_game" if env_id == "ka59" else f"{env_id}_game"
+    path = Path("results") / folder
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 @dataclass
@@ -48,6 +60,7 @@ class RunResult:
     won: bool
     turns: int
     levels_completed: int
+    env_id: str = DEFAULT_ENV_ID
     provider: str = ""
     model: str = ""
     errors: list[str] = field(default_factory=list)
@@ -57,6 +70,9 @@ class RunResult:
     invalid_actions: int = 0
     click_actions: int = 0
     moves_blocked: int = 0
+    object_pushes: int = 0
+    wall_transfers: int = 0
+    max_goals_occupied: int = 0  # peak count of goal tiles simultaneously occupied during the run
     forced_reframes: int = 0
     orient_history: list[str] = field(default_factory=list)
     discovery_turn: Optional[int] = None
@@ -64,11 +80,15 @@ class RunResult:
 
 def save_result(result: RunResult, run_id: Optional[str] = None) -> Path:
     cfg = result.config
-    run_id = run_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+    # Microsecond precision avoids same-second collisions when multiple trials
+    # of the same config finish concurrently across processes.
+    run_id = run_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S_%f")
     tag = f"f{cfg['feedback'][0]}_g{cfg['goal'][0]}_m{cfg['mechanics'][0]}_w{cfg['world'][0]}"
-    path = RESULTS_DIR / f"run_{tag}_{run_id}.json"
+    results_dir = _results_dir_for(result.env_id)
+    path = results_dir / f"run_{tag}_{run_id}.json"
     payload = {
         "config": result.config,
+        "env_id": result.env_id,
         "won": result.won,
         "turns": result.turns,
         "levels_completed": result.levels_completed,
@@ -80,6 +100,9 @@ def save_result(result: RunResult, run_id: Optional[str] = None) -> Path:
         "invalid_actions": result.invalid_actions,
         "click_actions": result.click_actions,
         "moves_blocked": result.moves_blocked,
+        "object_pushes": result.object_pushes,
+        "wall_transfers": result.wall_transfers,
+        "max_goals_occupied": result.max_goals_occupied,
         "forced_reframes": result.forced_reframes,
         "orient_history": result.orient_history,
         "discovery_turn": result.discovery_turn,
@@ -90,11 +113,14 @@ def save_result(result: RunResult, run_id: Optional[str] = None) -> Path:
     return path
 
 
-def _make_env():
+def _make_env(env_id: str = DEFAULT_ENV_ID):
+    import os
     from pathlib import Path
-    env_dir = str(Path(__file__).parents[1] / "environment_files")
-    arcade = arc_agi.Arcade(operation_mode=OperationMode.OFFLINE, environments_dir=env_dir)
-    return arcade.make("ka59", render_mode=None)
+    env_dir = Path(__file__).parents[1] / "environment_files"
+    # ka59simple loads the canonical ka59 source at import time; tell it where.
+    os.environ["KA59_BASE_DIR"] = str(env_dir / "ka59" / "38d34dbb")
+    arcade = arc_agi.Arcade(operation_mode=OperationMode.OFFLINE, environments_dir=str(env_dir))
+    return arcade.make(env_id, render_mode=None)
 
 
 def _grid_to_click_data(env, grid_x: int, grid_y: int) -> dict[str, int]:
@@ -191,6 +217,8 @@ def run_agent(
     turns_per_level: int = DEFAULT_TURNS_PER_LEVEL,
     verbose: bool = True,
     llm_client: Optional[LLMClient] = None,
+    reasoning_effort: Optional[str] = None,
+    env_id: str = DEFAULT_ENV_ID,
 ) -> RunResult:
     config = {
         "world": world_level,
@@ -203,15 +231,18 @@ def run_agent(
         won=False,
         turns=0,
         levels_completed=0,
+        env_id=env_id,
         provider=provider,
         model=model,
         timestamp=datetime.now(timezone.utc).isoformat(),
     )
 
-    client = llm_client if llm_client is not None else LLMClient(provider=provider, model=model)
+    client = llm_client if llm_client is not None else LLMClient(
+        provider=provider, model=model, reasoning_effort=reasoning_effort
+    )
     system_prompt = build_system_prompt(goal_level, mechanics_level)
 
-    env = _make_env()
+    env = _make_env(env_id)
     frame_data: FrameDataRaw = env.observation_space
     if frame_data is None:
         result.errors.append("Failed to initialise game (observation_space is None).")
@@ -412,11 +443,53 @@ def run_agent(
 
         result.levels_completed = int(frame_data.levels_completed)
 
-        # Detect action outcome for moves_blocked metric.
+        # Detect action outcome for moves_blocked / object_pushes / wall_transfers metrics.
         if action_name in ACTION_MAP and action_name != "CLICK":
             post_state = get_structured_state(env, frame_data, turn_in_level, step_budget)
             if post_state["player"]["position"] == curr_state["player"]["position"]:
                 result.moves_blocked += 1
+            # Compare selectable / block positions by list index (sprite order is stable
+            # across turns; name + id are not reliable identity keys here).
+            # In KA59 level 1, the "pushable objects" are the selectables themselves
+            # (no separate blocks). Player position is excluded since its movement is
+            # already counted as the move itself, not a push outcome.
+            player_pos = curr_state.get("player", {}).get("position")
+            for kind in ("blocks", "selectables"):
+                pre_list = curr_state.get("objects", {}).get(kind, []) or []
+                post_list = post_state.get("objects", {}).get(kind, []) or []
+                for i in range(min(len(pre_list), len(post_list))):
+                    pre_pos = pre_list[i].get("position")
+                    post_pos = post_list[i].get("position")
+                    if not pre_pos or not post_pos or pre_pos == post_pos:
+                        continue
+                    # Skip the player's own movement — that's the action itself, not a push.
+                    if pre_pos == player_pos:
+                        continue
+                    dx = abs(post_pos[0] - pre_pos[0])
+                    dy = abs(post_pos[1] - pre_pos[1])
+                    # Cells are 3px. A normal push shifts an object by exactly 3px in one axis.
+                    if (dx == 3 and dy == 0) or (dx == 0 and dy == 3):
+                        result.object_pushes += 1
+                    elif dx > 3 or dy > 3:
+                        # Larger jump = wall-transfer / teleport mechanic triggered.
+                        result.wall_transfers += 1
+            # Track partial-win signal: how many goal tiles are currently occupied by selectables.
+            goals = post_state.get("objects", {}).get("goals", []) or []
+            selectables = post_state.get("objects", {}).get("selectables", []) or []
+            blocks = post_state.get("objects", {}).get("blocks", []) or []
+            occupied = 0
+            for g in goals:
+                gx, gy = (g.get("position") or [None, None])[:2]
+                if gx is None: continue
+                gw, gh = (g.get("size") or [3, 3])[:2]
+                for o in selectables + blocks:
+                    ox, oy = (o.get("position") or [None, None])[:2]
+                    if ox is None: continue
+                    if gx <= ox < gx + gw and gy <= oy < gy + gh:
+                        occupied += 1
+                        break
+            if occupied > result.max_goals_occupied:
+                result.max_goals_occupied = occupied
 
         state_name = frame_data.state.name
         if state_name == "WIN":
@@ -464,6 +537,8 @@ def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Run the real KA59 game with an LLM agent.")
     p.add_argument("--provider", default="openrouter", choices=["openrouter"])
     p.add_argument("--model", default="google/gemini-2.5-flash")
+    p.add_argument("--env", default=DEFAULT_ENV_ID, choices=["ka59", "ka59simple"],
+                   help="Which environment to load. 'ka59' = canonical 7-level, 'ka59simple' = single-goal fork.")
     p.add_argument("--world", default="EASY", choices=["EASY", "HARD"])
     p.add_argument("--goal", default="EASY", choices=["EASY", "HARD"])
     p.add_argument("--mechanics", default="EASY", choices=["EASY", "HARD", "OODA", "OODA_F"])
@@ -486,6 +561,7 @@ def main() -> None:
         max_levels=args.max_levels,
         turns_per_level=args.turns_per_level,
         verbose=not args.quiet,
+        env_id=args.env,
     )
     save_result(result)
 
