@@ -348,7 +348,7 @@ def run_agent(
                 status_block = "STATUS:\n" + "\n".join(status_lines) + "\n"
 
                 forced_reframe_block = ""
-                if mechanics_level == "OODA_F" and global_turn > STUCK_THRESHOLD and (
+                if mechanics_level == "OODA_F" and attempt_turn > STUCK_THRESHOLD and (
                     position_stuck or consecutive_same_type_count >= STUCK_THRESHOLD
                 ):
                     reason = (
