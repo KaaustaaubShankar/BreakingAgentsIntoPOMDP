@@ -33,9 +33,10 @@ load_dotenv()
 class LLMClient:
     OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
-    def __init__(self, provider: str, model: str) -> None:
+    def __init__(self, provider: str, model: str, reasoning_effort: str | None = None) -> None:
         self.provider = provider.lower()
         self.model = model
+        self.reasoning_effort = reasoning_effort
         self.reset_usage()
 
     # ── Usage tracking ────────────────────────────────────────────────────────
@@ -92,8 +93,10 @@ class LLMClient:
 
     def generate(self, system_prompt: str, user_prompt: str) -> str:
         """Send a text-only request and return the reply."""
+        if self.provider == "qwen-local":
+            return self._generate_qwen_local(system_prompt, user_prompt)
         if self.provider != "openrouter":
-            raise ValueError(f"Unknown provider: {self.provider}. Use 'openrouter'.")
+            raise ValueError(f"Unknown provider: {self.provider}. Use 'openrouter' or 'qwen-local'.")
 
         resp = self._client().chat.completions.create(
             model=self.model,
@@ -143,6 +146,31 @@ class LLMClient:
         if content is None:
             raise ValueError("OpenRouter returned empty content.")
         return str(content)
+
+    def _generate_qwen_local(self, system_prompt: str, user_prompt: str) -> str:
+        """Local Qwen 3 inference. Delegates to top-level qwen_local module
+        so ka59_game / env3 / env4 share one model cache per process."""
+        import sys, pathlib
+        repo_root = str(pathlib.Path(__file__).resolve().parents[1])
+        if repo_root not in sys.path:
+            sys.path.insert(0, repo_root)
+        from qwen_local import generate as _qwen_generate
+        text, input_tokens, output_tokens = _qwen_generate(
+            self.model, system_prompt, user_prompt, self.reasoning_effort
+        )
+
+        class _U:
+            pass
+
+        _U.input_tokens = input_tokens
+        _U.output_tokens = output_tokens
+        _U.total_tokens = input_tokens + output_tokens
+
+        class _R:
+            usage = _U()
+
+        self._record_usage(_R())
+        return text
 
     # ── JSON parsing ──────────────────────────────────────────────────────────
 
