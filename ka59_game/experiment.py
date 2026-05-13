@@ -42,6 +42,9 @@ from .prompts import FEEDBACK_HARD, UNDERSTANDING_PROMPT, build_system_prompt, c
 DEFAULT_ENV_ID = "ka59"
 DEFAULT_TURNS_PER_LEVEL = 64
 STUCK_THRESHOLD = 5  # same order of magnitude as env4's bp35 budget
+LEVEL_ATTEMPTS = 2  # protocol constant — agent gets 2 attempts at each level
+                    # before the trial scores as failed at that level. Mirrors
+                    # env4/experiment.py:LEVEL_ATTEMPTS (commit efbb91f).
 MAX_LEVELS_HARD_CAP = 7       # arc_agi reports win_levels=7 for ka59
 
 
@@ -255,13 +258,9 @@ def run_agent(
 
     history: list[dict[str, Any]] = []
     action_history: list[str] = []
-    prev_state: Optional[dict[str, Any]] = None
-    last_action_name = ""
-    last_level_index = 0
-    turn_in_level = 0
-    position_history: list[tuple] = []
-    consecutive_same_type_count = 0
-    last_action_type_tracked = ""
+    history_block = ""
+    global_turn = 0
+    stop_run = False
 
     def log(event: dict[str, Any]) -> None:
         history.append({"timestamp": datetime.now(timezone.utc).isoformat(), **event})
@@ -270,246 +269,314 @@ def run_agent(
 
     log({"type": "game_start", "summary": f"KA59 real-game run started. levels={levels_to_play}", "config": config})
 
-    for turn in range(1, max_turns + 1):
-        result.turns = turn
-        curr_level_index = int(env._game.level_index)
-        if curr_level_index != last_level_index:
-            turn_in_level = 0
-            last_level_index = curr_level_index
-        turn_in_level += 1
-
-        curr_state = get_structured_state(env, frame_data, turn_in_level, step_budget)
-
-        if prev_state is not None:
-            if feedback_level == "EASY":
-                feedback_text = build_feedback_easy(prev_state, curr_state, last_action_name)
-            else:
-                feedback_text = FEEDBACK_HARD
-            action_history.append(f"Turn {turn - 1}: {last_action_name}\n  Result: {feedback_text}")
-
-        # Track position history for stuck detection
-        curr_pos = tuple(curr_state["player"]["position"]) if isinstance(curr_state["player"]["position"], list) else curr_state["player"]["position"]
-        position_history.append(curr_pos)
-        if len(position_history) > STUCK_THRESHOLD:
-            position_history.pop(0)
-
-        # Track consecutive same action-type (CLICK vs MOVE)
-        if last_action_name:
-            last_type = "CLICK" if "CLICK" in last_action_name else "MOVE"
-            if last_type == last_action_type_tracked:
-                consecutive_same_type_count += 1
-            else:
-                consecutive_same_type_count = 1
-                last_action_type_tracked = last_type
-
-        position_stuck = (
-            len(position_history) >= STUCK_THRESHOLD
-            and all(p == position_history[0] for p in position_history)
-        )
-
-        if world_level == "HARD":
-            obs_block = _build_world_hard_observation(curr_state, turn, max_turns)
-        else:
-            obs_block = _build_world_easy_observation(curr_state, turn, max_turns)
-
-        recent_history = action_history[-10:]
-        history_block = (
-            "RECENT ACTIONS (last 10 turns):\n" + "\n".join(recent_history) + "\n"
-            if recent_history else ""
-        )
-
-        status_lines = [
-            f"Selected: {curr_state['player']['id']} @ {curr_state['player']['position']}",
-            f"Level: {curr_state['level']['current']}/{curr_state['level']['total']}",
-            f"Steps remaining this level: {curr_state['resources']['steps_remaining']}",
-        ]
-        status_block = "STATUS:\n" + "\n".join(status_lines) + "\n"
-
-        forced_reframe_block = ""
-        if mechanics_level == "OODA_F" and turn > STUCK_THRESHOLD and (
-            position_stuck or consecutive_same_type_count >= STUCK_THRESHOLD
-        ):
-            reason = (
-                f"your position has not changed for {STUCK_THRESHOLD} consecutive turns"
-                if position_stuck
-                else f"you have used {last_action_type_tracked} actions {consecutive_same_type_count} times in a row"
-            )
-            forced_reframe_block = (
-                f"[FORCED REFRAME] No progress: {reason}. "
-                "Your current hypothesis is wrong. ABANDON it. Form a new hypothesis and choose a DIFFERENT action type.\n\n"
-            )
-            result.forced_reframes += 1
-            consecutive_same_type_count = 1
-            log({"type": "forced_reframe", "summary": f"Turn {turn}: forced reframe ({reason})", "turn": turn})
-
-        user_prompt = (
-            forced_reframe_block
-            + history_block
-            + "\n"
-            + status_block
-            + "\n"
-            + obs_block
-            + '\n\nRespond with a single JSON object only: {"reasoning": "<plan>", "action": "MOVE_RIGHT"}'
-        )
-
-        retry_prompt = (
-            "You forgot valid JSON. Reply with ONLY one JSON object.\n"
-            "Examples:\n"
-            '{"reasoning": "I should move right", "action": "MOVE_RIGHT"}\n'
-            '{"reasoning": "Switch to the other selectable", "action": "CLICK", "target_position": [11, 7]}'
-        )
-
-        try:
-            reply = client.generate(system_prompt, user_prompt)
-            try:
-                parsed = client.parse_json(reply)
-            except ValueError:
-                reply = client.generate(system_prompt, retry_prompt)
-                parsed = client.parse_json(reply)
-        except Exception as exc:
-            err = f"Turn {turn}: LLM/parse error — {exc}"
-            result.errors.append(err)
-            log({"type": "error", "summary": err})
-            continue
-
-        action_name = str(parsed.get("action", "")).upper().strip()
-        reasoning = str(parsed.get("reasoning", "")).strip()
-        target_position = parsed.get("target_position")
-
-        # OODA fields
-        observe_text = str(parsed.get("observe", "")).strip()
-        orient_text = str(parsed.get("orient", "")).strip()
-        decide_text = str(parsed.get("decide", "")).strip()
-        if orient_text:
-            result.orient_history.append(orient_text)
-            if result.discovery_turn is None and check_discovery(orient_text):
-                result.discovery_turn = turn
-
-        game_action: Optional[GameAction] = None
-        action_data: Optional[dict[str, int]] = None
-        if action_name in ACTION_MAP and action_name != "CLICK":
-            game_action = ACTION_MAP[action_name]
-        elif action_name == "CLICK":
-            if not isinstance(target_position, list) or len(target_position) != 2:
-                result.invalid_actions += 1
-                err = f"Turn {turn}: CLICK missing target_position"
-                result.errors.append(err)
-                log({"type": "invalid_action", "summary": err, "raw_reply": reply})
-                continue
-            try:
-                gx, gy = int(target_position[0]), int(target_position[1])
-                game_action = GameAction.ACTION6
-                action_data = _grid_to_click_data(env, gx, gy)
-                result.click_actions += 1
-            except Exception as exc:
-                result.invalid_actions += 1
-                err = f"Turn {turn}: invalid CLICK target {target_position!r} — {exc}"
-                result.errors.append(err)
-                log({"type": "invalid_action", "summary": err, "raw_reply": reply})
-                continue
-        else:
-            result.invalid_actions += 1
-            err = f"Turn {turn}: unknown action '{action_name}'"
-            result.errors.append(err)
-            log({"type": "invalid_action", "summary": err, "raw_reply": reply})
-            continue
+    # Walk levels one at a time. Each level gets LEVEL_ATTEMPTS shots.
+    while not stop_run and result.levels_completed < levels_to_play:
+        level_start_completed = int(result.levels_completed)
+        current_level = level_start_completed + 1
+        level_progressed = False
 
         log({
-            "type": "action",
-            "summary": f"Turn {turn}: {action_name}" + (f" | {reasoning or decide_text or orient_text}" if (reasoning or decide_text or orient_text) else ""),
-            "turn": turn,
-            "action": action_name,
-            "target_position": target_position,
-            "reasoning": reasoning,
-            "observe": observe_text,
-            "orient": orient_text,
-            "decide": decide_text,
+            "type": "level_start",
+            "summary": f"Level {current_level}/{levels_to_play} started.",
+            "level": current_level,
         })
 
-        prev_state = curr_state
-        last_action_name = action_name if action_name != "CLICK" else f"CLICK {target_position}"
+        for level_attempt in range(1, LEVEL_ATTEMPTS + 1):
+            # Per-attempt state — reset every retry.
+            attempt_turn = 0
+            prev_state: Optional[dict[str, Any]] = None
+            last_action_name = ""
+            position_history: list[tuple] = []
+            consecutive_same_type_count = 0
+            last_action_type_tracked = ""
 
-        try:
-            frame_data = env.step(game_action, data=action_data)
-        except Exception as exc:
-            err = f"Turn {turn}: env.step raised {type(exc).__name__}: {exc}"
-            result.errors.append(err)
-            log({"type": "env_error", "summary": err})
-            continue
+            action_history.append(
+                f"Level {current_level} attempt {level_attempt}/{LEVEL_ATTEMPTS} started."
+            )
 
-        if frame_data is None:
-            result.errors.append(f"Turn {turn}: env.step returned None.")
-            break
+            while attempt_turn < turns_per_level:
+                global_turn += 1
+                attempt_turn += 1
+                result.turns = global_turn
 
-        result.levels_completed = int(frame_data.levels_completed)
+                curr_state = get_structured_state(env, frame_data, attempt_turn, turns_per_level)
 
-        # Detect action outcome for moves_blocked / object_pushes / wall_transfers metrics.
-        if action_name in ACTION_MAP and action_name != "CLICK":
-            post_state = get_structured_state(env, frame_data, turn_in_level, step_budget)
-            if post_state["player"]["position"] == curr_state["player"]["position"]:
-                result.moves_blocked += 1
-            # Compare selectable / block positions by list index (sprite order is stable
-            # across turns; name + id are not reliable identity keys here).
-            # In KA59 level 1, the "pushable objects" are the selectables themselves
-            # (no separate blocks). Player position is excluded since its movement is
-            # already counted as the move itself, not a push outcome.
-            player_pos = curr_state.get("player", {}).get("position")
-            for kind in ("blocks", "selectables"):
-                pre_list = curr_state.get("objects", {}).get(kind, []) or []
-                post_list = post_state.get("objects", {}).get(kind, []) or []
-                for i in range(min(len(pre_list), len(post_list))):
-                    pre_pos = pre_list[i].get("position")
-                    post_pos = post_list[i].get("position")
-                    if not pre_pos or not post_pos or pre_pos == post_pos:
+                if prev_state is not None:
+                    if feedback_level == "EASY":
+                        feedback_text = build_feedback_easy(prev_state, curr_state, last_action_name)
+                    else:
+                        feedback_text = FEEDBACK_HARD
+                    action_history.append(f"Turn {global_turn - 1}: {last_action_name}\n  Result: {feedback_text}")
+
+                # Track position history for stuck detection
+                curr_pos = tuple(curr_state["player"]["position"]) if isinstance(curr_state["player"]["position"], list) else curr_state["player"]["position"]
+                position_history.append(curr_pos)
+                if len(position_history) > STUCK_THRESHOLD:
+                    position_history.pop(0)
+
+                # Track consecutive same action-type (CLICK vs MOVE)
+                if last_action_name:
+                    last_type = "CLICK" if "CLICK" in last_action_name else "MOVE"
+                    if last_type == last_action_type_tracked:
+                        consecutive_same_type_count += 1
+                    else:
+                        consecutive_same_type_count = 1
+                        last_action_type_tracked = last_type
+
+                position_stuck = (
+                    len(position_history) >= STUCK_THRESHOLD
+                    and all(p == position_history[0] for p in position_history)
+                )
+
+                if world_level == "HARD":
+                    obs_block = _build_world_hard_observation(curr_state, global_turn, max_turns)
+                else:
+                    obs_block = _build_world_easy_observation(curr_state, global_turn, max_turns)
+
+                recent_history = action_history[-10:]
+                history_block = (
+                    "RECENT ACTIONS (last 10 turns):\n" + "\n".join(recent_history) + "\n"
+                    if recent_history else ""
+                )
+
+                status_lines = [
+                    f"Selected: {curr_state['player']['id']} @ {curr_state['player']['position']}",
+                    f"Level: {curr_state['level']['current']}/{curr_state['level']['total']}",
+                    f"Attempt: {level_attempt}/{LEVEL_ATTEMPTS}",
+                    f"Steps remaining this level: {curr_state['resources']['steps_remaining']}",
+                ]
+                status_block = "STATUS:\n" + "\n".join(status_lines) + "\n"
+
+                forced_reframe_block = ""
+                if mechanics_level == "OODA_F" and global_turn > STUCK_THRESHOLD and (
+                    position_stuck or consecutive_same_type_count >= STUCK_THRESHOLD
+                ):
+                    reason = (
+                        f"your position has not changed for {STUCK_THRESHOLD} consecutive turns"
+                        if position_stuck
+                        else f"you have used {last_action_type_tracked} actions {consecutive_same_type_count} times in a row"
+                    )
+                    forced_reframe_block = (
+                        f"[FORCED REFRAME] No progress: {reason}. "
+                        "Your current hypothesis is wrong. ABANDON it. Form a new hypothesis and choose a DIFFERENT action type.\n\n"
+                    )
+                    result.forced_reframes += 1
+                    consecutive_same_type_count = 1
+                    log({"type": "forced_reframe", "summary": f"Turn {global_turn}: forced reframe ({reason})", "turn": global_turn})
+
+                user_prompt = (
+                    forced_reframe_block
+                    + history_block
+                    + "\n"
+                    + status_block
+                    + "\n"
+                    + obs_block
+                    + '\n\nRespond with a single JSON object only: {"reasoning": "<plan>", "action": "MOVE_RIGHT"}'
+                )
+
+                retry_prompt = (
+                    "You forgot valid JSON. Reply with ONLY one JSON object.\n"
+                    "Examples:\n"
+                    '{"reasoning": "I should move right", "action": "MOVE_RIGHT"}\n'
+                    '{"reasoning": "Switch to the other selectable", "action": "CLICK", "target_position": [11, 7]}'
+                )
+
+                try:
+                    reply = client.generate(system_prompt, user_prompt)
+                    try:
+                        parsed = client.parse_json(reply)
+                    except ValueError:
+                        reply = client.generate(system_prompt, retry_prompt)
+                        parsed = client.parse_json(reply)
+                except Exception as exc:
+                    err = f"Turn {global_turn}: LLM/parse error — {exc}"
+                    result.errors.append(err)
+                    log({"type": "error", "summary": err})
+                    continue
+
+                action_name = str(parsed.get("action", "")).upper().strip()
+                reasoning = str(parsed.get("reasoning", "")).strip()
+                target_position = parsed.get("target_position")
+
+                # OODA fields
+                observe_text = str(parsed.get("observe", "")).strip()
+                orient_text = str(parsed.get("orient", "")).strip()
+                decide_text = str(parsed.get("decide", "")).strip()
+                if orient_text:
+                    result.orient_history.append(orient_text)
+                    if result.discovery_turn is None and check_discovery(orient_text):
+                        result.discovery_turn = global_turn
+
+                game_action: Optional[GameAction] = None
+                action_data: Optional[dict[str, int]] = None
+                if action_name in ACTION_MAP and action_name != "CLICK":
+                    game_action = ACTION_MAP[action_name]
+                elif action_name == "CLICK":
+                    if not isinstance(target_position, list) or len(target_position) != 2:
+                        result.invalid_actions += 1
+                        err = f"Turn {global_turn}: CLICK missing target_position"
+                        result.errors.append(err)
+                        log({"type": "invalid_action", "summary": err, "raw_reply": reply})
                         continue
-                    # Skip the player's own movement — that's the action itself, not a push.
-                    if pre_pos == player_pos:
+                    try:
+                        gx, gy = int(target_position[0]), int(target_position[1])
+                        game_action = GameAction.ACTION6
+                        action_data = _grid_to_click_data(env, gx, gy)
+                        result.click_actions += 1
+                    except Exception as exc:
+                        result.invalid_actions += 1
+                        err = f"Turn {global_turn}: invalid CLICK target {target_position!r} — {exc}"
+                        result.errors.append(err)
+                        log({"type": "invalid_action", "summary": err, "raw_reply": reply})
                         continue
-                    dx = abs(post_pos[0] - pre_pos[0])
-                    dy = abs(post_pos[1] - pre_pos[1])
-                    # Cells are 3px. A normal push shifts an object by exactly 3px in one axis.
-                    if (dx == 3 and dy == 0) or (dx == 0 and dy == 3):
-                        result.object_pushes += 1
-                    elif dx > 3 or dy > 3:
-                        # Larger jump = wall-transfer / teleport mechanic triggered.
-                        result.wall_transfers += 1
-            # Track partial-win signal: how many goal tiles are currently occupied by selectables.
-            goals = post_state.get("objects", {}).get("goals", []) or []
-            selectables = post_state.get("objects", {}).get("selectables", []) or []
-            blocks = post_state.get("objects", {}).get("blocks", []) or []
-            occupied = 0
-            for g in goals:
-                gx, gy = (g.get("position") or [None, None])[:2]
-                if gx is None: continue
-                gw, gh = (g.get("size") or [3, 3])[:2]
-                for o in selectables + blocks:
-                    ox, oy = (o.get("position") or [None, None])[:2]
-                    if ox is None: continue
-                    if gx <= ox < gx + gw and gy <= oy < gy + gh:
-                        occupied += 1
-                        break
-            if occupied > result.max_goals_occupied:
-                result.max_goals_occupied = occupied
+                else:
+                    result.invalid_actions += 1
+                    err = f"Turn {global_turn}: unknown action '{action_name}'"
+                    result.errors.append(err)
+                    log({"type": "invalid_action", "summary": err, "raw_reply": reply})
+                    continue
 
-        state_name = frame_data.state.name
-        if state_name == "WIN":
-            result.won = True
-            log({"type": "win", "summary": f"WIN after {turn} turns."})
-            break
-        if state_name == "GAME_OVER":
-            log({"type": "game_over", "summary": f"GAME_OVER after {turn} turns."})
-            break
-        if max_levels is not None and int(frame_data.levels_completed) >= max_levels:
-            result.won = True
-            log({"type": "win", "summary": f"Reached {max_levels} level(s) after {turn} turns."})
+                log({
+                    "type": "action",
+                    "summary": f"Turn {global_turn}: {action_name}" + (f" | {reasoning or decide_text or orient_text}" if (reasoning or decide_text or orient_text) else ""),
+                    "turn": global_turn,
+                    "level": current_level,
+                    "attempt": level_attempt,
+                    "attempt_turn": attempt_turn,
+                    "action": action_name,
+                    "target_position": target_position,
+                    "reasoning": reasoning,
+                    "observe": observe_text,
+                    "orient": orient_text,
+                    "decide": decide_text,
+                    "state_before": curr_state,
+                })
+
+                prev_state = curr_state
+                last_action_name = action_name if action_name != "CLICK" else f"CLICK {target_position}"
+
+                try:
+                    frame_data = env.step(game_action, data=action_data)
+                except Exception as exc:
+                    err = f"Turn {global_turn}: env.step raised {type(exc).__name__}: {exc}"
+                    result.errors.append(err)
+                    log({"type": "env_error", "summary": err})
+                    continue
+
+                if frame_data is None:
+                    result.errors.append(f"Turn {global_turn}: env.step returned None.")
+                    stop_run = True
+                    break
+
+                result.levels_completed = int(frame_data.levels_completed)
+
+                # Detect action outcome for moves_blocked / object_pushes / wall_transfers metrics.
+                if action_name in ACTION_MAP and action_name != "CLICK":
+                    post_state = get_structured_state(env, frame_data, attempt_turn, turns_per_level)
+                    if post_state["player"]["position"] == curr_state["player"]["position"]:
+                        result.moves_blocked += 1
+                    # Compare selectable / block positions by list index (sprite order is stable
+                    # across turns; name + id are not reliable identity keys here).
+                    # In KA59 level 1, the "pushable objects" are the selectables themselves
+                    # (no separate blocks). Player position is excluded since its movement is
+                    # already counted as the move itself, not a push outcome.
+                    player_pos = curr_state.get("player", {}).get("position")
+                    for kind in ("blocks", "selectables"):
+                        pre_list = curr_state.get("objects", {}).get(kind, []) or []
+                        post_list = post_state.get("objects", {}).get(kind, []) or []
+                        for i in range(min(len(pre_list), len(post_list))):
+                            pre_pos = pre_list[i].get("position")
+                            post_pos = post_list[i].get("position")
+                            if not pre_pos or not post_pos or pre_pos == post_pos:
+                                continue
+                            # Skip the player's own movement — that's the action itself, not a push.
+                            if pre_pos == player_pos:
+                                continue
+                            dx = abs(post_pos[0] - pre_pos[0])
+                            dy = abs(post_pos[1] - pre_pos[1])
+                            # Cells are 3px. A normal push shifts an object by exactly 3px in one axis.
+                            if (dx == 3 and dy == 0) or (dx == 0 and dy == 3):
+                                result.object_pushes += 1
+                            elif dx > 3 or dy > 3:
+                                # Larger jump = wall-transfer / teleport mechanic triggered.
+                                result.wall_transfers += 1
+                    # Track partial-win signal: how many goal tiles are currently occupied by selectables.
+                    goals = post_state.get("objects", {}).get("goals", []) or []
+                    selectables = post_state.get("objects", {}).get("selectables", []) or []
+                    blocks = post_state.get("objects", {}).get("blocks", []) or []
+                    occupied = 0
+                    for g in goals:
+                        gx, gy = (g.get("position") or [None, None])[:2]
+                        if gx is None: continue
+                        gw, gh = (g.get("size") or [3, 3])[:2]
+                        for o in selectables + blocks:
+                            ox, oy = (o.get("position") or [None, None])[:2]
+                            if ox is None: continue
+                            if gx <= ox < gx + gw and gy <= oy < gy + gh:
+                                occupied += 1
+                                break
+                    if occupied > result.max_goals_occupied:
+                        result.max_goals_occupied = occupied
+
+                state_name = frame_data.state.name
+                if state_name == "WIN" or result.levels_completed > level_start_completed:
+                    level_progressed = True
+                    log({
+                        "type": "level_complete",
+                        "summary": f"Level {current_level} completed after {global_turn} turns.",
+                        "level": current_level,
+                        "levels_completed": result.levels_completed,
+                    })
+                    if result.levels_completed >= levels_to_play or state_name == "WIN":
+                        result.won = True
+                        log({"type": "win", "summary": f"WIN after {global_turn} turns."})
+                        stop_run = True
+                    break  # exit inner turn loop
+
+                if state_name == "GAME_OVER":
+                    break  # exit inner turn loop, retry the level
+
+            # Inner turn loop ended. Decide next action:
+            if stop_run or level_progressed:
+                break  # exit attempt loop; next level or end of run
+
+            failure_summary = (
+                f"Level {current_level} attempt {level_attempt}/{LEVEL_ATTEMPTS} "
+                f"failed after {attempt_turn} turns."
+            )
+            if level_attempt < LEVEL_ATTEMPTS:
+                log({"type": "level_retry", "summary": failure_summary + " Restarting the same level."})
+                action_history.append(
+                    failure_summary
+                    + " Game over. Restarting the same level and keeping this failure in context."
+                )
+                try:
+                    frame_data = env.step(GameAction.RESET)
+                except Exception as exc:
+                    result.errors.append(
+                        f"Level {current_level} attempt {level_attempt}: env.step(RESET) raised "
+                        f"{type(exc).__name__}: {exc}"
+                    )
+                    stop_run = True
+                    break
+                if frame_data is None:
+                    result.errors.append(
+                        f"Level {current_level} attempt {level_attempt}: env.step(RESET) returned None."
+                    )
+                    stop_run = True
+                    break
+                continue
+
+            log({"type": "game_over", "summary": failure_summary + " No attempts remaining."})
+            action_history.append(failure_summary + " No attempts remaining.")
+            stop_run = True
             break
 
-        if turn_in_level >= step_budget:
-            # out of budget for this level; the game may not auto-end so we stop
-            log({"type": "budget_exhausted", "summary": f"Level {curr_level_index+1} step budget exhausted."})
+        if stop_run:
             break
-    else:
-        log({"type": "timeout", "summary": f"Turn budget ({max_turns}) exhausted."})
+
+    if not result.won and not stop_run and result.levels_completed < levels_to_play:
+        log({"type": "timeout", "summary": f"Turn budget exhausted at turn {global_turn}."})
 
     understanding_prompt_text = (history_block if action_history else "") + "\n" + UNDERSTANDING_PROMPT
     try:
