@@ -93,7 +93,12 @@ def main():
     account = boto3.client("sts").get_caller_identity()["Account"]
     role_arn = f"arn:aws:iam::{account}:role/AmazonSageMaker-{handle}"
 
-    image_uri = f"763104351884.dkr.ecr.{region}.amazonaws.com/pytorch-training:2.4.0-gpu-py311-cu124-ubuntu22.04-sagemaker"
+    # AWS Deep Learning Container — PyTorch 2.9 / py312 / CUDA 13.0.
+    # py312 is REQUIRED: arc-agi>=0.9.6 (used by ka59_game/env3/env4 harnesses)
+    # only ships wheels for python >=3.12. Earlier py311 image (2.4.0) failed
+    # with InstallRequirementsError on `pip install arc-agi`. Catalog:
+    # https://github.com/aws/deep-learning-containers/blob/master/available_images.md
+    image_uri = f"763104351884.dkr.ecr.{region}.amazonaws.com/pytorch-training:2.9.0-gpu-py312-cu130-ubuntu22.04-sagemaker"
 
     job_name = args.job_name or f"{project}-{int(time.time())}"
     staging_dir = stage_source_dir(os.getcwd())
