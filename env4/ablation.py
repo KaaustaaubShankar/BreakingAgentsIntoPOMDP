@@ -147,7 +147,7 @@ def run_ablation(
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Run ablation study for Environment 4.")
     p.add_argument("--trials", type=int, default=5)
-    p.add_argument("--provider", default="openrouter", choices=["openrouter"])
+    p.add_argument("--provider", default="openrouter", choices=["openrouter", "qwen-local"])
     p.add_argument("--model", default="meta-llama/llama-3.3-70b-instruct:free")
     p.add_argument("--configs", nargs="+", choices=list(ALL_CONFIGS.keys()))
     p.add_argument("--quiet", action="store_true")

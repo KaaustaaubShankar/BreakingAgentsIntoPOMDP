@@ -1,0 +1,21 @@
+# SageMaker training-job requirements.
+#
+# Used by sagemaker_submit.py: the launcher renames this file to
+# requirements.txt inside the staging dir so SageMaker auto-installs it at
+# container start. Keep local requirements.txt API-only (no torch) so devs
+# without GPUs don't pay the install cost.
+
+# Project API deps (mirror of requirements.txt — keep in sync when adding
+# providers that need extra SDKs).
+anthropic==0.86.0
+openai==2.29.0
+python-dotenv==1.2.2
+tqdm==4.67.3
+
+# Local-inference deps for the qwen-local provider.
+# torch is preinstalled in the pytorch-training:2.4.0 DLC — do NOT pin it here
+# or the container will reinstall (3-5 min cold-start hit on every job).
+transformers>=4.46.0
+accelerate>=1.0.0
+huggingface_hub>=0.26.0
+sentencepiece

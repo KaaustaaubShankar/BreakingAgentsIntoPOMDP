@@ -170,7 +170,7 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--trials", type=int, default=5,
                    help="Number of trials per config (default: 5).")
     p.add_argument("--provider", default="openrouter",
-                   choices=["openrouter"],
+                   choices=["openrouter", "qwen-local"],
                    help="LLM provider (default: openrouter).")
     p.add_argument("--model", default="meta-llama/llama-3.3-70b-instruct:free",
                    help="OpenRouter model identifier.")
