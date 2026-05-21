@@ -82,14 +82,18 @@ class LLMClient:
         if self.provider != "openrouter":
             raise ValueError(f"Unknown provider: {self.provider}. Use 'openrouter'.")
 
-        response = self._client().chat.completions.create(
-            model=self.model,
-            reasoning_effort=self.reasoning_effort,
-            messages=[
+        kwargs = {
+            "model": self.model,
+            "reasoning_effort": self.reasoning_effort,
+            "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-        )
+        }
+        if self.reasoning_effort and self.reasoning_effort != "none":
+            kwargs["extra_body"] = {"reasoning": {"enabled": True}}
+
+        response = self._client().chat.completions.create(**kwargs)
         self._record_usage(response)
         content = response.choices[0].message.content
         if content is None:
@@ -105,10 +109,10 @@ class LLMClient:
         if self.provider != "openrouter":
             raise ValueError(f"Unknown provider: {self.provider}. Use 'openrouter'.")
 
-        response = self._client().chat.completions.create(
-            model=self.model,
-            reasoning_effort=self.reasoning_effort,
-            messages=[
+        kwargs = {
+            "model": self.model,
+            "reasoning_effort": self.reasoning_effort,
+            "messages": [
                 {"role": "system", "content": system_prompt},
                 {
                     "role": "user",
@@ -121,7 +125,13 @@ class LLMClient:
                     ],
                 },
             ],
-        )
+        }
+        if self.reasoning_effort and self.reasoning_effort != "none":
+            kwargs["extra_body"] = {"reasoning": {"enabled": True, "effort": self.reasoning_effort}}
+
+        response = self._client().chat.completions.create(**kwargs)
+
+
         self._record_usage(response)
         content = response.choices[0].message.content
         if content is None:
