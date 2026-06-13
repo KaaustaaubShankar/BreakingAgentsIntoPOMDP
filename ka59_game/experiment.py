@@ -79,6 +79,13 @@ class RunResult:
     forced_reframes: int = 0
     orient_history: list[str] = field(default_factory=list)
     discovery_turn: Optional[int] = None
+    # First turn the regex fired on ANY verbal channel (reasoning or orient).
+    # Candidate only — includes speculative hypotheses; needs LLM-judge pass.
+    verbal_candidate_turn: Optional[int] = None
+    reasoning_effort: Optional[str] = None
+    input_tokens: int = 0
+    output_tokens: int = 0
+    reasoning_tokens: int = 0
 
 
 def save_result(result: RunResult, run_id: Optional[str] = None) -> Path:
@@ -109,6 +116,11 @@ def save_result(result: RunResult, run_id: Optional[str] = None) -> Path:
         "forced_reframes": result.forced_reframes,
         "orient_history": result.orient_history,
         "discovery_turn": result.discovery_turn,
+        "verbal_candidate_turn": result.verbal_candidate_turn,
+        "reasoning_effort": result.reasoning_effort,
+        "input_tokens": result.input_tokens,
+        "output_tokens": result.output_tokens,
+        "reasoning_tokens": result.reasoning_tokens,
         "history": result.history,
     }
     path.write_text(json.dumps(payload, indent=2))
@@ -238,6 +250,7 @@ def run_agent(
         provider=provider,
         model=model,
         timestamp=datetime.now(timezone.utc).isoformat(),
+        reasoning_effort=reasoning_effort,
     )
 
     client = llm_client if llm_client is not None else LLMClient(
@@ -406,6 +419,10 @@ def run_agent(
                     result.orient_history.append(orient_text)
                     if result.discovery_turn is None and check_discovery(orient_text):
                         result.discovery_turn = global_turn
+                verbal_text = " ".join(t for t in (reasoning, orient_text) if t)
+                if (result.verbal_candidate_turn is None and verbal_text
+                        and check_discovery(verbal_text)):
+                    result.verbal_candidate_turn = global_turn
 
                 game_action: Optional[GameAction] = None
                 action_data: Optional[dict[str, int]] = None
@@ -451,6 +468,9 @@ def run_agent(
                     "decide": decide_text,
                     "state_before": curr_state,
                 })
+                # log() copies the event dict; keep the stored entry so the
+                # post-step outcome can be attached to this turn's record.
+                action_entry = history[-1]
 
                 prev_state = curr_state
                 last_action_name = action_name if action_name != "CLICK" else f"CLICK {target_position}"
@@ -473,7 +493,10 @@ def run_agent(
                 # Detect action outcome for moves_blocked / object_pushes / wall_transfers metrics.
                 if action_name in ACTION_MAP and action_name != "CLICK":
                     post_state = get_structured_state(env, frame_data, attempt_turn, turns_per_level)
-                    if post_state["player"]["position"] == curr_state["player"]["position"]:
+                    turn_blocked = post_state["player"]["position"] == curr_state["player"]["position"]
+                    turn_pushes = 0
+                    turn_transfers = 0
+                    if turn_blocked:
                         result.moves_blocked += 1
                     # Compare selectable / block positions by list index (sprite order is stable
                     # across turns; name + id are not reliable identity keys here).
@@ -497,9 +520,18 @@ def run_agent(
                             # Cells are 3px. A normal push shifts an object by exactly 3px in one axis.
                             if (dx == 3 and dy == 0) or (dx == 0 and dy == 3):
                                 result.object_pushes += 1
+                                turn_pushes += 1
                             elif dx > 3 or dy > 3:
                                 # Larger jump = wall-transfer / teleport mechanic triggered.
                                 result.wall_transfers += 1
+                                turn_transfers += 1
+                    # Per-turn outcome on the history record: enables
+                    # verbal-vs-behavioral discovery timing in post-analysis.
+                    action_entry["outcome"] = {
+                        "blocked": turn_blocked,
+                        "object_pushes": turn_pushes,
+                        "wall_transfers": turn_transfers,
+                    }
                     # Track partial-win signal: how many goal tiles are currently occupied by selectables.
                     goals = post_state.get("objects", {}).get("goals", []) or []
                     selectables = post_state.get("objects", {}).get("selectables", []) or []
@@ -593,6 +625,10 @@ def run_agent(
         result.errors.append(f"Understanding prompt failed: {exc}")
 
     result.history = history
+    usage = client.get_usage_summary()
+    result.input_tokens = usage.get("input_tokens", 0)
+    result.output_tokens = usage.get("output_tokens", 0)
+    result.reasoning_tokens = usage.get("reasoning_tokens", 0)
     try:
         save_result(result)
     except Exception as exc:
@@ -608,7 +644,7 @@ def _parse_args() -> argparse.Namespace:
                    help="Which environment to load. 'ka59' = canonical 7-level, 'ka59simple' = single-goal fork.")
     p.add_argument("--world", default="EASY", choices=["EASY", "HARD"])
     p.add_argument("--goal", default="EASY", choices=["EASY", "HARD"])
-    p.add_argument("--mechanics", default="EASY", choices=["EASY", "HARD", "OODA", "OODA_F"])
+    p.add_argument("--mechanics", default="EASY", choices=["EASY", "HARD", "HARD_FORMAT_ONLY", "OODA", "OODA_F"])
     p.add_argument("--feedback", default="EASY", choices=["EASY", "HARD"])
     p.add_argument("--max-levels", type=int, default=1, help="Default 1 for smoke test speed")
     p.add_argument("--turns-per-level", type=int, default=DEFAULT_TURNS_PER_LEVEL)

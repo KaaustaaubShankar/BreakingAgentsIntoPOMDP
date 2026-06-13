@@ -151,8 +151,28 @@ verbal channels, agents *hypothesize* the hidden rule frequently
 trigger the mechanic and win. The trigger ≠ exploit ≠ articulate dissociation
 survives and is now measured on the channels agents actually write to.
 
-Remaining for this track: hand-label ~50 items to report judge agreement, and
-regenerate per-condition tables for the paper from the cache (`--table-only`).
+**Judge reliability (done).** A second judge (Grok 4.3) re-scored all
+candidates. Three-level agreement with Haiku is **κ = 0.896** (94.7% raw,
+n=1389); collapsed claim-vs-none κ = 0.914. The two judges differ mainly on
+the hypothesis/confirmed boundary, so the confirmed-trial rate is judge-
+sensitive (Haiku 0.6%, Grok 2.1%) but **both agree it is under ~2%**, while
+the hypothesis-or-better rate is judge-robust (Haiku 33%, Grok 31%). The
+headline — hypothesis-rich (~31–33%), confirmation-poor (<2%) — holds under
+either judge.
+
+**Bonus finding (verbal level predicts winning).** Pooling KA59-Simple
+trials, win rate rises monotonically with verbal level: none 20% → hypothesis
+38% → confirmed 50% (n = 347 / 182 / 4). In every individual condition where
+both groups exist, hypothesizing trials win at least as often as non-
+hypothesizing ones. Verbalizing the right hypothesis tracks success even
+though confirming the rule almost never happens.
+(`results/verbal_judge/verbal_level_vs_win.txt`.)
+
+Remaining for this track: humans fill the blind 50-item sheet
+(`results/verbal_judge/handlabel_sample_blind.csv`) for a human-vs-judge
+agreement number; paste the LaTeX rewrites from
+`docs/colm_verbal_discovery_rewrite.md` once the team picks pooled-vs-canonical
+scoping.
 
 ## 4. Decisions needed from the team
 

@@ -30,23 +30,29 @@ from ka59_game.prompts import check_discovery
 
 
 def _verbal_discovery_turn(history: list[dict]) -> int | None:
+    """First turn the discovery regex fires on ANY verbal channel (reasoning or
+    orient). Candidate-level only: matches include speculative hypotheses
+    ("test if the wall is passable"), not just confirmed rule statements —
+    downstream LLM-judge classification distinguishes the two."""
     for h in history:
         if h.get("type") != "action":
             continue
-        orient = h.get("orient") or ""
-        if orient and check_discovery(orient):
+        text = " ".join(t for t in (h.get("reasoning"), h.get("orient")) if t)
+        if text and check_discovery(text):
             return h.get("turn")
     return None
 
 
 def _behavioral_discovery_turn(history: list[dict]) -> int | None:
-    """First turn a push/transfer-style event happened, reconstructed from action+turn metadata.
-    Note: per-trial JSON does not currently log per-turn push/transfer flags directly, so we
-    approximate via the *aggregate* counts plus action names (CLICK doesn't contribute).
-    A more precise signal would require adding per-turn flags to experiment.py — TODO."""
-    # Right now experiment.py only stores AGGREGATE wall_transfers/object_pushes; per-event
-    # turn timestamps are not retained. This function returns None as a placeholder until we
-    # add per-turn instrumentation. For papers, use the aggregate counts directly for now.
+    """First turn a wall-transfer event was recorded, from the per-turn
+    `outcome` flags experiment.py attaches to each action record. Older trial
+    JSONs (before 2026-06-12) lack `outcome` and return None — for those, only
+    the aggregate wall_transfers count is available."""
+    for h in history:
+        if h.get("type") != "action":
+            continue
+        if (h.get("outcome") or {}).get("wall_transfers"):
+            return h.get("turn")
     return None
 
 
