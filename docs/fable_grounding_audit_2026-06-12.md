@@ -119,6 +119,41 @@ no reruns).**
 own prompts/client. Cheap to scan, embarrassing to miss before the
 cross-environment claims go out.
 
+## 3b. Results of the corrected analysis (completed 2026-06-12, same day)
+
+The three-level judge pass is done: 1,453 items (every regex-candidate turn +
+every end-of-run understanding reflection) across 689 trials, judged by
+Claude Haiku 4.5 via OpenRouter (`scripts/judge_verbal_discovery.py`,
+judgments cached in `results/verbal_judge/judgments.jsonl`).
+
+**Item-level: none = 755, hypothesis = 679, confirmed = 4.**
+
+- **Hypotheses are everywhere.** Capable models speculate about wall
+  pass-through in a large fraction of trials (GPT-5.2 baseline: 11/31
+  trials; feedback-hard: 16/29; goal-hard: 21/34; DeepSeek-v4-pro similar or
+  higher). Agents actively probe the right hypothesis.
+- **Confirmed rule statements almost never happen: 4 trials out of 689
+  (~0.6%).** And none of the four states the full asymmetry (active piece
+  blocked vs. pushed piece passes); they are partial pass-through claims.
+  Notably, 2 of the 4 have zero wall transfers — confirmed-sounding claims
+  with no behavioral basis (ungrounded belief), e.g. "outer wall is passable"
+  in a losing, zero-transfer trial.
+- **The exit interview consolidates nothing.** Of 654 judged understanding
+  reflections, exactly 1 is a (partial) confirmed statement. Models that
+  physically used the mechanic and won still describe walls as blocking in
+  the post-run reflection.
+
+**Corrected paper claim:** replace "verbal discovery is 0% under a strict
+keyword filter" with: under a judge-validated three-level measure over all
+verbal channels, agents *hypothesize* the hidden rule frequently
+(30–60% of trials for capable models) but *consolidate* it almost never
+(~0.6% of trials, 0% for the full asymmetry) — even in trials where they
+trigger the mechanic and win. The trigger ≠ exploit ≠ articulate dissociation
+survives and is now measured on the channels agents actually write to.
+
+Remaining for this track: hand-label ~50 items to report judge agreement, and
+regenerate per-condition tables for the paper from the cache (`--table-only`).
+
 ## 4. Decisions needed from the team
 
 1. **Prominence:** does the corrected discovery analysis become a results
