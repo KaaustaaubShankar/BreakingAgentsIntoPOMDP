@@ -115,9 +115,11 @@ no reruns).**
    runs; rates on everything). Compute confirmation→win correlation.
 3. Rewrite the four passages around the corrected numbers.
 
-**Track 4 — BP35 (env4) audit.** Same orient-only gap likely exists in env4's
-own prompts/client. Cheap to scan, embarrassing to miss before the
-cross-environment claims go out.
+**Track 4 — BP35 (env4) audit.** Done — see Section 3c. Verdict: BP35 has no
+verbal-discovery artifact (no discovery code at all), and the KA59
+verbal-discovery metric is structurally non-transferable to BP35. The audit
+turned up an independent verbal corroboration of the inferability spectrum
+instead.
 
 ## 3b. Results of the corrected analysis (completed 2026-06-12, same day)
 
@@ -173,6 +175,59 @@ Remaining for this track: humans fill the blind 50-item sheet
 agreement number; paste the LaTeX rewrites from
 `docs/colm_verbal_discovery_rewrite.md` once the team picks pooled-vs-canonical
 scoping.
+
+## 3c. BP35 verbal-channel audit (Track 4, completed 2026-06-13)
+
+Scanned all **242** BP35 run files on `origin/rerunning-bp35`
+(`env4/results/run_*.json`, models gpt-4o / gpt-4.1 / gpt-5.2 / sonnet-4.6).
+
+**(a) No artifact — and no verbal-discovery code at all.** env4 has no
+`check_discovery`, no `orient` field, no discovery metric. So unlike KA59,
+there is no broken instrumentation to correct; the paper's verbal-discovery
+claim was already correctly scoped to KA59-Simple only.
+
+**(b) The KA59 metric is structurally non-transferable to BP35.** Two reasons:
+1. *Nothing is permanently hidden.* BP35's "hidden mechanic" (gravity,
+   fall-destination preview, breakable-block CLICK) is **fully described in
+   `MECHANICS_EASY`** (env4/prompts.py lines 21-33, 52-53). Under 4 of 5
+   configs the agent is *told* the rules, so articulating them is prompt
+   repetition, not discovery. Only `mechanics_hard` withholds them. Contrast
+   KA59, where the wall-transfer asymmetry is hidden in **every** condition.
+2. *No per-turn verbal channel where it would matter.* `MECHANICS_HARD`
+   requests only `{"action","target_position"}` (no `reasoning`), so per-turn
+   reasoning is empty in 87% of mechanics_hard turns (13% non-empty vs.
+   99-100% in every other config). The only verbal signal under the
+   rule-withheld condition is the end-of-run understanding reflection.
+3. *Sanity check:* the KA59 wall-transfer regex fires **0 / 5054** times on
+   BP35 reasoning — it is a wall-transfer-specific probe by construction.
+
+**(c) The fair cross-environment analogue — "rule re-inference under
+mechanics_hard" — corroborates the inferability spectrum.** Scoring the 40
+BP35 mechanics_hard understanding reflections (rules withheld) for recovery of
+the withheld dynamics:
+
+| Withheld rule recovered in reflection | BP35 mech_hard (n=40) |
+|---|---|
+| gravity / fall behavior | 40/40 (100%) |
+| breakable-block / click interaction | 33/40 (82%) |
+| gravity flip / reversal (rarer level feature) | 7/40 (18%) |
+| won the level | 30/40 (75%) |
+
+BP35 agents **re-articulate withheld rules and still win** because the physics
+are visible in state deltas (fall previews). KA59 agents under the same axis
+**neither articulate** the wall-transfer rule (0.6-2.1%) **nor win** (~0%)
+because it is opaque. This is independent verbal evidence for the win-rate-
+based inferability spectrum already in the paper (Section 5/6): the verbal
+channel and the outcome channel agree on *which* environment's hidden rule is
+recoverable.
+
+**Paper implication.** (1) Keep verbal discovery presented as a KA59-specific
+probe; do not imply it generalizes — it can't, by construction. (2) The BP35
+mechanics_hard re-inference numbers are a cheap, defensible addition that
+strengthens the inferability-spectrum discussion with a second, non-outcome
+signal. Caveat: the n=40 pools models/timestamps, not the canonical n=10/n=5
+cells — recompute on canonical trials if it goes in a table.
+(Script: ad-hoc; numbers reproducible from `origin/rerunning-bp35` run files.)
 
 ## 4. Decisions needed from the team
 

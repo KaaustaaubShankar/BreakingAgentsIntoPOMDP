@@ -10,6 +10,16 @@ with ≥1 judged item; caches in `results/verbal_judge/`).
 > efforts, dates). Either (a) present the verbal analysis as a separate
 > pooled analysis with its n stated — as drafted below — or (b) recompute on
 > exactly the canonical table trials. Don't mix the two silently.
+>
+> **Keep it KA59-specific.** The BP35 audit (`scripts/audit_bp35_verbal.py`,
+> audit doc §3c) confirms verbal discovery does not transfer: BP35 states its
+> mechanics in the easy prompt and has no per-turn verbal channel under
+> mechanics_hard, so there is no analogous "discovery" to measure. Do not
+> phrase the verbal finding as cross-environment. The defensible cross-env
+> verbal result is the opposite direction — BP35 agents *re-infer* withheld
+> rules (100% gravity, 82% breakable) and win, where KA59 agents do neither —
+> which belongs in the inferability-spectrum discussion, not the discovery
+> metric definition.
 
 ---
 
