@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from datetime import datetime, timezone
@@ -78,10 +79,13 @@ def run_ablation(
 
     results_dir = _results_dir(env_id)
     results_dir.mkdir(parents=True, exist_ok=True)
-    # Microsecond precision so two parallel ablation processes started in the
-    # same second (e.g. when launched as background jobs from the same shell)
-    # don't write to the same ablation_*.json filename and clobber each other.
+    # Microsecond precision AND the PID so two parallel ablation processes
+    # started in the same instant (e.g. background jobs fanned out from one
+    # shell loop) can't collide on the ablation_*.json filename and clobber
+    # each other. Microseconds alone proved insufficient: near-simultaneous
+    # launches across cores observed identical %f values.
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S_%f")
+    run_tag = f"{timestamp}_p{os.getpid()}"
     summary: dict = {}  # key: f"{effort}::{cfg_name}"
 
     print(f"\n{'='*60}")
@@ -279,7 +283,7 @@ def run_ablation(
         "env_id": env_id,
         "results": summary,
     }
-    out_path = results_dir / f"ablation_{provider}_{model.replace('/', '_')}_{timestamp}.json"
+    out_path = results_dir / f"ablation_{provider}_{model.replace('/', '_')}_{run_tag}.json"
     out_path.write_text(json.dumps(out, indent=2))
     print(f"\nResults saved → {out_path}")
 

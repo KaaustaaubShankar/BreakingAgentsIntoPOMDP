@@ -39,6 +39,7 @@ class LLMClient:
         return {
             "input_tokens": 0,
             "output_tokens": 0,
+            "reasoning_tokens": 0,
             "total_tokens": 0,
             "calls": 0,
             "calls_with_usage": 0,
@@ -60,10 +61,15 @@ class LLMClient:
         input_tokens = _val(usage, "input_tokens", "prompt_tokens") or 0
         output_tokens = _val(usage, "output_tokens", "completion_tokens") or 0
         total_tokens = _val(usage, "total_tokens") or (input_tokens + output_tokens)
+        # OpenRouter/OpenAI return reasoning tokens under completion_tokens_details
+        details = (usage.get("completion_tokens_details") if isinstance(usage, dict)
+                   else getattr(usage, "completion_tokens_details", None))
+        reasoning_tokens = (_val(details, "reasoning_tokens") or 0) if details is not None else 0
         has_usage = usage is not None and any(x > 0 for x in (input_tokens, output_tokens, total_tokens))
         return {
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
+            "reasoning_tokens": reasoning_tokens,
             "total_tokens": total_tokens,
             "calls": 1,
             "calls_with_usage": 1 if has_usage else 0,
@@ -123,6 +129,8 @@ class LLMClient:
             return self._generate_claude_proxy(system_prompt, user_prompt)
         if self.provider == "openai":
             return self._generate_openai(system_prompt, user_prompt)
+        if self.provider == "deepseek":
+            return self._generate_deepseek(system_prompt, user_prompt)
         if self.provider == "xai":
             return self._generate_xai(system_prompt, user_prompt)
         if self.provider == "qwen-mlx":
@@ -132,8 +140,63 @@ class LLMClient:
         raise ValueError(
             f"Unknown provider: {self.provider!r}. "
             "Use 'openrouter', 'anthropic', 'claude-cli', 'claude-proxy', "
-            "'openai', 'xai', 'qwen-local', or 'qwen-mlx'."
+            "'openai', 'deepseek', 'xai', 'qwen-local', or 'qwen-mlx'."
         )
+
+    DEEPSEEK_BASE_URL = "https://api.deepseek.com"
+
+    def _deepseek_client(self):
+        import openai
+        api_key = os.environ.get("DEEPSEEK_API_KEY")
+        if not api_key:
+            raise ValueError("DEEPSEEK_API_KEY not set.")
+        if not hasattr(self, "_ds_client"):
+            self._ds_client = openai.OpenAI(
+                base_url=self.DEEPSEEK_BASE_URL,
+                api_key=api_key,
+                timeout=120.0,
+            )
+        return self._ds_client
+
+    def _generate_deepseek(self, system_prompt: str, user_prompt: str) -> str:
+        """Direct DeepSeek API (OpenAI-compatible) for deepseek-v4-pro/flash.
+
+        deepseek-v4-pro is a thinking model by default. The native API does NOT
+        accept reasoning_effort="none" (valid: low/medium/high/max/xhigh), so the
+        no-reasoning condition is expressed by explicitly disabling thinking via
+        extra_body {"thinking": {"type": "disabled"}}. Higher efforts pass through
+        as reasoning_effort. max_tokens is kept generous so a reasoning chain (when
+        enabled) doesn't consume the whole budget and leave empty content.
+        """
+        import time
+        kwargs: Dict[str, Any] = dict(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            max_tokens=4096,
+        )
+        effort = (self.reasoning_effort or "none").lower()
+        if effort in ("none", "off", "disabled"):
+            kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+        else:
+            kwargs["reasoning_effort"] = effort
+        for attempt in range(4):
+            try:
+                response = self._deepseek_client().chat.completions.create(**kwargs)
+                self._record_usage(response)
+                content = response.choices[0].message.content
+                if not content:
+                    raise ValueError("DeepSeek returned empty content.")
+                return str(content)
+            except Exception as exc:
+                msg = str(exc)
+                if "429" in msg and attempt < 3:
+                    time.sleep(10 * (attempt + 1))
+                    continue
+                raise
+        raise RuntimeError("DeepSeek call exhausted retries without raising.")
 
     def _generate_xai(self, system_prompt: str, user_prompt: str) -> str:
         import openai as _openai
@@ -342,17 +405,17 @@ class LLMClient:
 
     def _generate_openrouter(self, system_prompt: str, user_prompt: str) -> str:
         import time
-        # Cap generation. Without this, reasoning models on OpenRouter (Grok,
-        # gpt-5.x with medium/high effort) can emit multi-thousand-token
-        # reasoning chains per turn and stall a trial for many minutes. Direct
-        # xAI calls below already cap at 1024; we match that here.
+        # Cap generation to prevent reasoning models from stalling a trial for
+        # many minutes on multi-thousand-token chains. xhigh/high effort gets a
+        # larger budget so the reasoning chain isn't truncated mid-thought.
+        _high_effort = self.reasoning_effort in ("xhigh", "high", "medium")
         kwargs: Dict[str, Any] = dict(
             model=self.model,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            max_tokens=1024,
+            max_tokens=4096 if _high_effort else 1024,
         )
         if self.reasoning_effort:
             # OpenRouter unified reasoning param works for all supported
