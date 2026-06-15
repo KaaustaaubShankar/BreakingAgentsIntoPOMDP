@@ -87,6 +87,10 @@ class RunResult:
     timestamp: str = ""
     wall_collisions: int = 0
     goals_ever_activated: int = 0  # distinct goals whose requirements were ever matched
+    reasoning_effort: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    reasoning_tokens: int = 0
 
 
 # ── Save helper ───────────────────────────────────────────────────────────────
@@ -111,6 +115,10 @@ def save_result(result: RunResult, run_id: Optional[str] = None) -> Path:
         "understanding": result.understanding,
         "wall_collisions": result.wall_collisions,
         "goals_ever_activated": result.goals_ever_activated,
+        "reasoning_effort": result.reasoning_effort,
+        "input_tokens": result.input_tokens,
+        "output_tokens": result.output_tokens,
+        "reasoning_tokens": result.reasoning_tokens,
         "history": result.history,
     }, indent=2))
     print(f"  Saved → {path}")
@@ -126,6 +134,7 @@ def run_agent(
     feedback_level: str = "EASY",
     provider: str = "openrouter",
     model: str = "meta-llama/llama-3.3-70b-instruct:free",
+    reasoning_effort: Optional[str] = None,
     vision: bool = False,
     turns_per_level: int = TURNS_PER_LEVEL,
     max_levels: Optional[int] = None,
@@ -140,9 +149,10 @@ def run_agent(
     result = RunResult(
         config=config, won=False, turns=0, levels_completed=0,
         provider=provider, model=model, vision=vision, timestamp=timestamp,
+        reasoning_effort=reasoning_effort or "",
     )
 
-    client = LLMClient(provider=provider, model=model)
+    client = LLMClient(provider=provider, model=model, reasoning_effort=reasoning_effort)
     system_prompt = build_system_prompt(goal_level, mechanics_level)
 
     arc = arc_agi.Arcade(operation_mode=OperationMode.OFFLINE)
@@ -357,6 +367,11 @@ def run_agent(
              "understanding": result.understanding})
     except Exception as exc:
         result.errors.append(f"Understanding prompt failed: {exc}")
+
+    usage = client.get_usage_summary()
+    result.input_tokens = usage.get("input_tokens", 0)
+    result.output_tokens = usage.get("output_tokens", 0)
+    result.reasoning_tokens = usage.get("reasoning_tokens", 0)
 
     result.history = history
     return result

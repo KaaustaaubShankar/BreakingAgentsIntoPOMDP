@@ -9,9 +9,19 @@ import os
 import re
 from typing import Any, Dict
 
+from pathlib import Path
+
 from dotenv import load_dotenv
 
 load_dotenv()
+# arc_agi/base.py loads `.env.example` at import (override=False). When run from
+# env4/, that pulls the placeholder OPENROUTER_API_KEY from env4/.env.example,
+# which — depending on import order — can shadow the real key and cause silent
+# 401 "Missing Authentication header" on every turn (0-token trials that look
+# like normal losses). Force the real key from the repo-root .env.
+_ROOT_ENV = Path(__file__).resolve().parents[1] / ".env"
+if _ROOT_ENV.exists():
+    load_dotenv(_ROOT_ENV, override=True)
 
 
 class LLMClient:
