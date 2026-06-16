@@ -58,6 +58,7 @@ class RunResult:
     click_actions: int = 0
     gravity_flips: int = 0
     undos: int = 0
+    usage: dict[str, Any] = field(default_factory=dict)
 
 
 def save_result(result: RunResult, run_id: Optional[str] = None) -> Path:
@@ -84,6 +85,7 @@ def save_result(result: RunResult, run_id: Optional[str] = None) -> Path:
         "gravity_flips": result.gravity_flips,
         "undos": result.undos,
         "history": result.history,
+        "usage": result.usage,
     }
     path.write_text(json.dumps(payload, indent=2))
     print(f"  Saved -> {path}")
@@ -616,6 +618,11 @@ def run_agent(
         result.errors.append(f"Understanding prompt failed: {exc}")
 
     result.history = history
+    # attach accumulated usage summary (includes token counts and cost)
+    try:
+        result.usage = client.get_usage_summary()
+    except Exception:
+        result.usage = {}
     return result
 
 

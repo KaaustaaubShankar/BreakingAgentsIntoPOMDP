@@ -34,6 +34,7 @@ class LLMClient:
             "total_tokens": 0,
             "calls": 0,
             "calls_with_usage": 0,
+            "cost": 0.0,
         }
 
     def _extract_usage(self, response: Any) -> Dict[str, int]:
@@ -53,19 +54,40 @@ class LLMClient:
         output_tokens = _val(usage, "output_tokens", "completion_tokens") or 0
         total_tokens = _val(usage, "total_tokens") or (input_tokens + output_tokens)
         has_usage = usage is not None and any(x > 0 for x in (input_tokens, output_tokens, total_tokens))
+
+        # try to extract float cost if present
+        cost_val = None
+        try:
+            if isinstance(usage, dict):
+                cost_val = usage.get("cost")
+            else:
+                cost_val = getattr(usage, "cost", None)
+            if cost_val is None:
+                cost_val = 0.0
+            else:
+                cost_val = float(cost_val)
+        except Exception:
+            cost_val = 0.0
+
         return {
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "total_tokens": total_tokens,
             "calls": 1,
             "calls_with_usage": 1 if has_usage else 0,
+            "cost": cost_val,
         }
 
     def _record_usage(self, response: Any) -> None:
         usage = self._extract_usage(response)
         self.last_usage = usage
         for key, value in usage.items():
-            self.usage_totals[key] += value
+            # ensure numeric accumulation works for both ints and floats
+            prev = self.usage_totals.get(key, 0)
+            try:
+                self.usage_totals[key] = prev + value
+            except Exception:
+                self.usage_totals[key] = value
 
     def get_usage_summary(self) -> Dict[str, int]:
         return dict(self.usage_totals)
