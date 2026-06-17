@@ -78,7 +78,11 @@ def main() -> None:
         p = parse_pct(win_str)
         if p is None or n == 0:
             continue
-        key = (r["Model"].strip(), r["Game"].strip(), r["Reasoning"].strip(), r["Config"].strip())
+        # Normalize ka59simple's "-R"-suffixed reasoning labels so none/medium
+        # pair correctly with every other env in the Fisher comparisons.
+        reason = r["Reasoning"].strip()
+        reason = {"no-R": "none", "medium-R": "medium", "default-R": "default"}.get(reason, reason)
+        key = (r["Model"].strip(), r["Game"].strip(), reason, r["Config"].strip())
         cells[key] = (round(p * n), n)
 
     # 1. Wilson CI table

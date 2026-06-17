@@ -24,10 +24,28 @@ _Session ending 2026-06-17. COLM submission deadline: **June 23, 2026 (AoE)**._
 4. Condition comparisons (none vs medium, GPT vs Grok): **Fisher's exact** on the 2x2; report p (+ odds ratio). Non-overlapping Wilson CIs is a conservative sufficient signal.
 5. Mixed N across cells — report N per cell; designate primary comparisons confirmatory, rest exploratory (or Holm-correct).
 
-## BLOCKERS found today (need fixing before the full CI table is correct)
-1. **ka59simple deepseek N=20 not in the CSV.** It exists in `results/ka59simple_real_ablation/ablation_deepseek_*.json` (6 files incl. 2 `*_recovered_*`) but was never added to `dashboard/jkj results - Detailed_Results.csv`. → add those rows (Model `deepseek-v4-pro`, Game `ka59simple`, none+medium x 5 configs).
-2. **Inconsistent reasoning labels in ka59simple rows:** `no-R` / `medium-R` / `default-R` instead of `none` / `medium` / `default`. This silently drops ka59simple from the Fisher comparison pairing. → normalize labels in the CSV (or map them in the script).
-   - Both of these are part of the [[paper-data-reconciliation-conflicts]] memory — some calls may need Edward (Sheet vs paper.tex mismatches).
+## ka59simple deepseek — DATA IS CONFOUNDED, needs a clean re-run (2026-06-17 update)
+Tried to "add ka59simple fully" and found three problems making the existing deepseek ka59simple data NOT paper-usable as-is:
+1. **`medium` is ~75% zero-token contaminated.** Team's older OpenRouter run: ~20/26 trials per cell were silent 401/zero-token failures counted as losses (raw `medium::baseline`=4% is an artifact; real ~17% on N≈6). Same silent-failure bug class as the arc_agi/.env one.
+2. **Turn-budget mismatch.** deepseek ka59simple ran at **128 turns** (1 level x turns_per_level=128) while gpt/grok + paper.tex use a **32-turn budget**. 4x larger budget → not comparable across models.
+3. **Endpoint split.** deepseek `none` = direct DeepSeek API; `medium` = OpenRouter. (LS20 was all-OpenRouter = clean.)
+4. (Fixed) **Label inconsistency** `no-R`/`medium-R`/`default-R` — now normalized non-destructively in `wilson_cis.py` on read (ka59simple gpt-5.2 now pairs in Fisher output).
+
+### Corrected plan (CONFIRM budget=32, then launch) — fixes all 3 at once
+Re-run deepseek ka59simple **none + medium together, OpenRouter, `--max-turns 32`, N=20, 5 configs**
+(baseline/world_hard/mechanics_hard/mechanics_hard_format_only/feedback_hard; no goal_hard).
+→ 32-turn budget matches gpt/grok/paper; OpenRouter matches LS20; fresh run kills contamination; ~4x cheaper
+than 128 (≈ $15 / a few hours, not $50 / 2 days). Command:
+```
+for eff in none medium; do for cfg in baseline world_hard mechanics_hard mechanics_hard_format_only feedback_hard; do
+  python -m scripts.run_real_ablation --env ka59simple --provider openrouter --model deepseek/deepseek-v4-pro \
+    --reasoning-effort $eff --configs $cfg --trials 20 --max-turns 32 \
+    --input-cost-per-m 0.30 --output-cost-per-m 0.90 > /tmp/ka59s_${eff}_${cfg}.log 2>&1 &
+done; done; wait
+```
+**MONITOR first trials for tok=0 (abort if contaminated).** The wrong-budget (128) medium run launched 2026-06-17 was killed.
+After it finishes: add deepseek ka59simple rows to `dashboard/` CSVs (Detailed + Overview), update VM CSVs, regenerate `docs/ci_table.txt`.
+NOTE: the gpt/grok ka59simple data may ALSO have zero-token contamination worth auditing (see [[paper-data-reconciliation-conflicts]] — needs Edward's calls).
 
 ## Next steps (recommended order)
 1. **Reconcile the CSV** (the two blockers above) → re-run `python scripts/wilson_cis.py > docs/ci_table.txt`. Confirm ka59simple deepseek none-vs-medium now appears with Fisher p.
