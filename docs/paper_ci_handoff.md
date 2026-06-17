@@ -31,7 +31,15 @@ Tried to "add ka59simple fully" and found three problems making the existing dee
 3. **Endpoint split.** deepseek `none` = direct DeepSeek API; `medium` = OpenRouter. (LS20 was all-OpenRouter = clean.)
 4. (Fixed) **Label inconsistency** `no-R`/`medium-R`/`default-R` — now normalized non-destructively in `wilson_cis.py` on read (ka59simple gpt-5.2 now pairs in Fisher output).
 
-### UPDATE 2: medium IS real — topping up to N=20 (launched 2026-06-17)
+### UPDATE 3: switched medium to DIRECT DeepSeek API (Kaaus cost catch, 2026-06-17)
+Kaaus flagged OpenRouter is mispricing DeepSeek: its displayed top price isn't real — it routes across providers (Alibaba etc.) so the true cost is the **weighted average** (page bottom), and since DeepSeek emits ~5x GPT's tokens, OpenRouter is **~$1.50/trial vs ~$0.33/trial on the direct DeepSeek API** (and direct is faster). So:
+- **Killed the OpenRouter medium top-up.** Relaunched **fresh N=20 medium on the DIRECT API** (provider=deepseek, default 128-turn budget, 5 configs) — verified healthy, no auth errors. This makes ka59simple fully endpoint-consistent (none+medium both direct API) and is ~3x cheaper. Logs `/tmp/ka59s_medD_<cfg>.log`. **Fresh N=20 = NO merge needed** (supersedes Update 2's top-up/merge plan and the OpenRouter clean medium).
+- **WHEN DONE:** aggregate the new `ablation_deepseek_*` medium files (dedup, drop tok=0) -> N=20; add medium Detailed rows + clean medium Overview row to dashboard CSVs + VM; restart dashboard; regen `docs/ci_table.txt`.
+
+### COST-REPORTING CORRECTION NEEDED (paper) — from Kaaus's catch
+The reported costs (LS20 $20.10; all OpenRouter cells) were computed at $0.30/$0.90 per M, which are OpenRouter *estimates that understate* the real weighted-average (~$1.50/trial empirically). For the paper's cost analysis: recompute with accurate per-endpoint rates — OpenRouter weighted-avg for the LS20/old data, real direct DeepSeek API rates for ka59simple none + new medium. Get real rates from Kaaus / OpenRouter+DeepSeek billing. Cost is a selling point ([[paper-revision-bens-findings]] budget angle), so the numbers must be right.
+
+### (superseded) UPDATE 2: medium IS real — top-up plan (replaced by Update 3 direct re-run)
 Re-examined: the medium run DID work (slow ~500k-reasoning trials are genuine). What I'd called "contamination" was dead-key **zero-token instant failures mixed in** (~15-20/cell). Clean medium = N=5-10/cell at the **same 128-turn budget as none** → deepseek none-vs-medium IS internally comparable, and shows the SAME reasoning-hurts pattern as LS20 (baseline 60->17, mech 20->0, feedback 75->38).
 Decision (Edward): **top up to N=20.** LAUNCHED 5 cells (medium, OpenRouter, DEFAULT budget=128, deltas baseline+15/world+11/mech+16/format+15/feedback+13) — verified OpenRouter live, no auth errors. ~2 days for slow cells. Logs `/tmp/ka59s_medtopup_<cfg>.log`.
 **WHEN DONE:** merge existing-clean medium (non-zero-token, deduped) + new trials -> exactly N=20/cell; compute win rates; add 5 medium Detailed rows + restore a CLEAN medium Overview row (deepseek ka59simple) to `dashboard/` CSVs + VM; restart dashboard; regenerate `docs/ci_table.txt`. Budget caveat (128 vs gpt 32) still applies to the whole deepseek ka59simple row.
