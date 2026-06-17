@@ -31,7 +31,13 @@ Tried to "add ka59simple fully" and found three problems making the existing dee
 3. **Endpoint split.** deepseek `none` = direct DeepSeek API; `medium` = OpenRouter. (LS20 was all-OpenRouter = clean.)
 4. (Fixed) **Label inconsistency** `no-R`/`medium-R`/`default-R` — now normalized non-destructively in `wilson_cis.py` on read (ka59simple gpt-5.2 now pairs in Fisher output).
 
-### RESOLUTION (2026-06-17): added clean none, skipped medium
+### UPDATE 2: medium IS real — topping up to N=20 (launched 2026-06-17)
+Re-examined: the medium run DID work (slow ~500k-reasoning trials are genuine). What I'd called "contamination" was dead-key **zero-token instant failures mixed in** (~15-20/cell). Clean medium = N=5-10/cell at the **same 128-turn budget as none** → deepseek none-vs-medium IS internally comparable, and shows the SAME reasoning-hurts pattern as LS20 (baseline 60->17, mech 20->0, feedback 75->38).
+Decision (Edward): **top up to N=20.** LAUNCHED 5 cells (medium, OpenRouter, DEFAULT budget=128, deltas baseline+15/world+11/mech+16/format+15/feedback+13) — verified OpenRouter live, no auth errors. ~2 days for slow cells. Logs `/tmp/ka59s_medtopup_<cfg>.log`.
+**WHEN DONE:** merge existing-clean medium (non-zero-token, deduped) + new trials -> exactly N=20/cell; compute win rates; add 5 medium Detailed rows + restore a CLEAN medium Overview row (deepseek ka59simple) to `dashboard/` CSVs + VM; restart dashboard; regenerate `docs/ci_table.txt`. Budget caveat (128 vs gpt 32) still applies to the whole deepseek ka59simple row.
+Dedup/merge recipe: gather medium trials from `results/ka59simple_real_ablation/ablation_openrouter_deepseek_*` (existing) + the new top-up files; drop `input_tokens==0`; md5-dedup; take 20/cell.
+
+### RESOLUTION (2026-06-17, SUPERSEDED by Update 2 for medium): added clean none, skipped medium
 Decision: the direct-API `none` (N=20, clean, zero contamination) is good data — added it as-is. `medium` has no clean version (only the contaminated OpenRouter batch) and was **skipped** (no re-run). The wrong-budget re-runs (128 then 32) were both killed.
 - Added 5 `none` Detailed rows + kept the correct Overview none row (row 29) in `dashboard/` CSVs AND on the VM; **removed the contaminated `medium` Overview row** (was 75% zero-token garbage).
 - `docs/ci_table.txt` regenerated — deepseek ka59simple none now has Wilson CIs (baseline 60% [39,78], world_hard 0% [0,16], mechanics_hard 20% [8,42], mech_format 20%, feedback_hard 75% [53,89]).
