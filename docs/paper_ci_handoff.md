@@ -31,7 +31,14 @@ Tried to "add ka59simple fully" and found three problems making the existing dee
 3. **Endpoint split.** deepseek `none` = direct DeepSeek API; `medium` = OpenRouter. (LS20 was all-OpenRouter = clean.)
 4. (Fixed) **Label inconsistency** `no-R`/`medium-R`/`default-R` — now normalized non-destructively in `wilson_cis.py` on read (ka59simple gpt-5.2 now pairs in Fisher output).
 
-### Corrected plan (CONFIRM budget=32, then launch) — fixes all 3 at once
+### RESOLUTION (2026-06-17): added clean none, skipped medium
+Decision: the direct-API `none` (N=20, clean, zero contamination) is good data — added it as-is. `medium` has no clean version (only the contaminated OpenRouter batch) and was **skipped** (no re-run). The wrong-budget re-runs (128 then 32) were both killed.
+- Added 5 `none` Detailed rows + kept the correct Overview none row (row 29) in `dashboard/` CSVs AND on the VM; **removed the contaminated `medium` Overview row** (was 75% zero-token garbage).
+- `docs/ci_table.txt` regenerated — deepseek ka59simple none now has Wilson CIs (baseline 60% [39,78], world_hard 0% [0,16], mechanics_hard 20% [8,42], mech_format 20%, feedback_hard 75% [53,89]).
+- **CAVEAT for the paper:** deepseek ka59simple ran at a **128-turn budget** vs gpt/grok's 32 → footnote this; deepseek-vs-gpt on ka59simple is NOT apples-to-apples. No deepseek `medium` row for ka59simple.
+- The clean cross-condition (none vs medium) deepseek story lives in **LS20** (both N=20, OpenRouter, same budget) — that's the headline.
+
+### (superseded) earlier corrected plan — re-run at 32 — NOT pursued
 Re-run deepseek ka59simple **none + medium together, OpenRouter, `--max-turns 32`, N=20, 5 configs**
 (baseline/world_hard/mechanics_hard/mechanics_hard_format_only/feedback_hard; no goal_hard).
 → 32-turn budget matches gpt/grok/paper; OpenRouter matches LS20; fresh run kills contamination; ~4x cheaper
