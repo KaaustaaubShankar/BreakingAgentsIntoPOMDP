@@ -43,8 +43,14 @@ for eff in none medium; do for cfg in baseline world_hard mechanics_hard mechani
     --input-cost-per-m 0.30 --output-cost-per-m 0.90 > /tmp/ka59s_${eff}_${cfg}.log 2>&1 &
 done; done; wait
 ```
-**MONITOR first trials for tok=0 (abort if contaminated).** The wrong-budget (128) medium run launched 2026-06-17 was killed.
-After it finishes: add deepseek ka59simple rows to `dashboard/` CSVs (Detailed + Overview), update VM CSVs, regenerate `docs/ci_table.txt`.
+**STATUS: LAUNCHED 2026-06-17 ~03:30 UTC** — all 10 cells (none+medium x 5 configs) running at 32-turn budget on OpenRouter, verified no auth errors / real tokens (gate-checked). Running overnight (~hours). Logs `/tmp/ka59s_<eff>_<cfg>.log`; results land in `results/ka59simple_real_ablation/ablation_openrouter_deepseek_*` + per-trial `results/ka59simple_game/`. The wrong-budget (128) medium run was killed.
+
+### TOMORROW — when the re-run is done
+1. Verify: no tok=0 trials; N=20/cell; budget=/32.
+2. Aggregate the new deepseek ka59simple none+medium win rates (dedupe like the LS20 merge).
+3. Add deepseek ka59simple rows to `dashboard/jkj results - Detailed_Results.csv` (Detailed) + fix Overview rows 29/30; push the dashboard CSVs to the VM (`breaking-agents.exe.xyz:/home/exedev/`) and restart `python3 app.py`.
+4. `python scripts/wilson_cis.py > docs/ci_table.txt` — confirm ka59simple deepseek none-vs-medium Fisher p appears.
+5. Then the paper steps: flip COLM framing + CI table, Wilson error-bar figures, Background.
 NOTE: the gpt/grok ka59simple data may ALSO have zero-token contamination worth auditing (see [[paper-data-reconciliation-conflicts]] — needs Edward's calls).
 
 ## Next steps (recommended order)
