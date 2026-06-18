@@ -31,7 +31,12 @@ Tried to "add ka59simple fully" and found three problems making the existing dee
 3. **Endpoint split.** deepseek `none` = direct DeepSeek API; `medium` = OpenRouter. (LS20 was all-OpenRouter = clean.)
 4. (Fixed) **Label inconsistency** `no-R`/`medium-R`/`default-R` — now normalized non-destructively in `wilson_cis.py` on read (ka59simple gpt-5.2 now pairs in Fisher output).
 
-### UPDATE 4 (RESOLVED 2026-06-18): medium added at N=9-13 (DeepSeek balance ran out)
+### UPDATE 5 (2026-06-18): POOLED medium old+new -> N=14-23 (Edward's combine idea, $0)
+Disk-full scare was a transient on the data volume (now 322Gi free; results/ka59simple_game is only 193MB/864 files — not the cause, nothing deleted). Then pooled the REAL (non-zero-token) deepseek-v4-pro medium trials from the old OpenRouter batch + the new direct-API run (both medium, 128-turn): N = baseline 16, world_hard 23, mech 14, format 15, feedback 18. Updated Detailed + Overview medium rows (pooled) in dashboard CSVs + VM; regen ci_table.
+**Reasoning-hurts now significant on TWO ka59simple cells: baseline 60->19% (Fisher p=0.019 *) and feedback_hard 75->22% (p=0.003 **)** — baseline crossed into significance vs the earlier N=10. Endpoint-pool footnote needed (OpenRouter + direct, same model/effort/budget).
+STRATEGY (agreed): combine old+new (done, free); SKIP GPT-5.2 N=20 (older model, would eat the ~$90 budget, deepseek already carries the confirmatory headline); spend remaining time + $90 on the WRITE-UP (CI framing, error-bar figs, cost-correction, Background). Optional ~$10/~17-trial direct-API top-up could even medium to exactly N=20 but not needed.
+
+### UPDATE 4 (2026-06-18): medium added at N=9-13 (DeepSeek balance ran out) [superseded by Update 5 pooling]
 The direct-API medium run hit **402 Insufficient Balance** partway — the DeepSeek account drained mid-run (these 452k-output trials burn balance fast). ~10-11 of 20/cell failed with 402 (zero-token). Edward chose: **use the clean survivors as-is** (no top-up). Added clean deepseek ka59simple MEDIUM rows at **N=9-13** (402/zero-token dropped) to dashboard CSVs + VM; added clean medium Overview row; dashboard restarted; ci_table regenerated.
 Final deepseek ka59simple (direct API, 128-turn budget): none baseline 60/world 0/mech 20/format 20/feedback 75 (N=20); medium baseline 20%(2/10)/world 0%(0/13)/mech 0%(0/9)/format 0%(0/9)/feedback 10%(1/10).
 **Result: reasoning-hurts is significant on feedback_hard (75->10%, Fisher p=0.0014 **), borderline on baseline (60->20%, p=0.058); corroborates LS20** even at small medium N. CAVEATS for paper: (a) 128-turn budget vs gpt/grok 32 — not gpt-comparable; (b) medium N=9-13 (small) — footnote; (c) cost-reporting correction still owed (see below).
