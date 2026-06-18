@@ -31,7 +31,13 @@ Tried to "add ka59simple fully" and found three problems making the existing dee
 3. **Endpoint split.** deepseek `none` = direct DeepSeek API; `medium` = OpenRouter. (LS20 was all-OpenRouter = clean.)
 4. (Fixed) **Label inconsistency** `no-R`/`medium-R`/`default-R` — now normalized non-destructively in `wilson_cis.py` on read (ka59simple gpt-5.2 now pairs in Fisher output).
 
-### UPDATE 3: switched medium to DIRECT DeepSeek API (Kaaus cost catch, 2026-06-17)
+### UPDATE 4 (RESOLVED 2026-06-18): medium added at N=9-13 (DeepSeek balance ran out)
+The direct-API medium run hit **402 Insufficient Balance** partway — the DeepSeek account drained mid-run (these 452k-output trials burn balance fast). ~10-11 of 20/cell failed with 402 (zero-token). Edward chose: **use the clean survivors as-is** (no top-up). Added clean deepseek ka59simple MEDIUM rows at **N=9-13** (402/zero-token dropped) to dashboard CSVs + VM; added clean medium Overview row; dashboard restarted; ci_table regenerated.
+Final deepseek ka59simple (direct API, 128-turn budget): none baseline 60/world 0/mech 20/format 20/feedback 75 (N=20); medium baseline 20%(2/10)/world 0%(0/13)/mech 0%(0/9)/format 0%(0/9)/feedback 10%(1/10).
+**Result: reasoning-hurts is significant on feedback_hard (75->10%, Fisher p=0.0014 **), borderline on baseline (60->20%, p=0.058); corroborates LS20** even at small medium N. CAVEATS for paper: (a) 128-turn budget vs gpt/grok 32 — not gpt-comparable; (b) medium N=9-13 (small) — footnote; (c) cost-reporting correction still owed (see below).
+DONE with the ka59simple data step. Remaining paper work: flip COLM framing + insert CI table, Wilson error-bar figures, Background, cost-correction.
+
+### (history) UPDATE 3: switched medium to DIRECT DeepSeek API (Kaaus cost catch, 2026-06-17)
 Kaaus flagged OpenRouter is mispricing DeepSeek: its displayed top price isn't real — it routes across providers (Alibaba etc.) so the true cost is the **weighted average** (page bottom), and since DeepSeek emits ~5x GPT's tokens, OpenRouter is **~$1.50/trial vs ~$0.33/trial on the direct DeepSeek API** (and direct is faster). So:
 - **Killed the OpenRouter medium top-up.** Relaunched **fresh N=20 medium on the DIRECT API** (provider=deepseek, default 128-turn budget, 5 configs) — verified healthy, no auth errors. This makes ka59simple fully endpoint-consistent (none+medium both direct API) and is ~3x cheaper. Logs `/tmp/ka59s_medD_<cfg>.log`. **Fresh N=20 = NO merge needed** (supersedes Update 2's top-up/merge plan and the OpenRouter clean medium).
 - **WHEN DONE:** aggregate the new `ablation_deepseek_*` medium files (dedup, drop tok=0) -> N=20; add medium Detailed rows + clean medium Overview row to dashboard CSVs + VM; restart dashboard; regen `docs/ci_table.txt`.
