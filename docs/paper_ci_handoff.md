@@ -13,17 +13,27 @@ _Session ending 2026-06-17. COLM submission deadline: **June 23, 2026 (AoE)**._
 - feedback_hard 18 → **+2**
 (~17 trials; run +2 buffer each since some may error / dedup.)
 
-**🚧 BLOCKER — check first:** the DeepSeek **direct API balance is EMPTY** (it hit `402 Insufficient Balance` last run; that's why medium stopped). Before launching, EITHER (a) refill the DeepSeek account and use `--provider deepseek`, OR (b) use OpenRouter with the provider pinned cheap: `extra_body={"provider":{"order":["DeepSeek"],"allow_fallbacks":false}}` (≈ direct rate). **Gate-check a real call returns tokens (reason/out > 0) before the full run, and monitor the first trials for `tok=0in` — abort if 402/zero-token recurs.**
+**🚧 PLAN (decided by Edward): run on OpenRouter with the PROVIDER PINNED.** The DeepSeek direct API balance is empty (402), and OpenRouter's default *pooled* routing was ~3× the direct cost (it load-balances across Alibaba/Together/etc. that charge more for DeepSeek's heavy token output). So redeploy via `--provider openrouter --model deepseek/deepseek-v4-pro` but **pin to DeepSeek's first-party provider** so the rate ≈ direct and doesn't vary.
 
-**Budget/settings:** default 128-turn (matches existing medium), `--reasoning-effort medium`, deepseek-v4-pro, rates 0.30/0.90. Run per-cell:
+**Code change needed (one-time):** `ka59_game/llm_client.py` `_generate_openrouter` currently sets `extra_body={"reasoning":{"effort":...}}`. Add a provider pin so it becomes:
+```python
+extra_body = {"reasoning": {"effort": self.reasoning_effort},
+              "provider": {"order": ["DeepSeek"], "allow_fallbacks": False}}
 ```
-for cfg in baseline mechanics_hard mechanics_hard_format_only feedback_hard; do
-  .venv/bin/python -m scripts.run_real_ablation --env ka59simple --provider deepseek \
-    --model deepseek-v4-pro --reasoning-effort medium --configs "$cfg" --trials <gap+2> \
-    --input-cost-per-m 0.30 --output-cost-per-m 0.90 > /tmp/ka59s_medtop_$cfg.log 2>&1 &
+(Verify the slug: `curl https://openrouter.ai/api/v1/models/deepseek/deepseek-v4-pro/endpoints` to see provider names; if "DeepSeek" first-party isn't listed, use `{"sort": "price"}` for cheapest. Make it deepseek-only so other models' runs are unaffected.)
+
+**Gate-check before the full run:** one call → confirm tokens>0 AND inspect cost/provider (OpenRouter returns the serving provider; log it) so we know the pin took and the rate is the cheap one. Monitor first trials for `tok=0in` — abort if 402/zero-token/expensive-provider.
+
+**Budget/settings:** default 128-turn (matches existing medium), `--reasoning-effort medium`, rates 0.30/0.90 for reporting. Run per-cell (gap+2 buffer):
+```
+for spec in "baseline 6" "mechanics_hard 8" "mechanics_hard_format_only 7" "feedback_hard 4"; do
+  set -- $spec
+  .venv/bin/python -m scripts.run_real_ablation --env ka59simple --provider openrouter \
+    --model deepseek/deepseek-v4-pro --reasoning-effort medium --configs "$1" --trials "$2" \
+    --input-cost-per-m 0.30 --output-cost-per-m 0.90 > /tmp/ka59s_medtop_$1.log 2>&1 &
 done; wait
 ```
-(world_hard already ≥20 — don't rerun it.) These are slow (~2–3h/trial, heavy reasoning) → ~half a day.
+(world_hard already ≥20 — don't rerun.) Slow (~2–3h/trial) → ~half a day. NOTE: pooling will then mix OpenRouter-pinned + earlier direct trials — same deepseek-v4-pro/medium/128-turn, so fine; keep the endpoint-pool footnote.
 
 **AFTER it finishes:**
 1. Re-pool: real (non-zero-token) medium trials, dedup, take exactly 20/cell. Recompute win rates + Wilson CIs + Fisher (`scripts/wilson_cis.py`).
