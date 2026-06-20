@@ -2,6 +2,39 @@
 
 _Session ending 2026-06-17. COLM submission deadline: **June 23, 2026 (AoE)**._
 
+## ⏯️ RESUME AFTER RESTART (2026-06-20): top up DeepSeek KA59-Simple MEDIUM to clean N=20
+**Goal:** Edward wants the DeepSeek-V4-Pro `medium` KA59-Simple cells at an exact N=20 (currently pooled 14–23). Everything else DeepSeek is already clean N=20 (LS20 none+medium, KA59-Simple none).
+
+**Current real (non-zero-token) N per medium cell → gap to 20:**
+- baseline 16 → **+4**
+- world_hard 23 → done (skip)
+- mechanics_hard 14 → **+6**
+- mechanics_hard_format_only 15 → **+5**
+- feedback_hard 18 → **+2**
+(~17 trials; run +2 buffer each since some may error / dedup.)
+
+**🚧 BLOCKER — check first:** the DeepSeek **direct API balance is EMPTY** (it hit `402 Insufficient Balance` last run; that's why medium stopped). Before launching, EITHER (a) refill the DeepSeek account and use `--provider deepseek`, OR (b) use OpenRouter with the provider pinned cheap: `extra_body={"provider":{"order":["DeepSeek"],"allow_fallbacks":false}}` (≈ direct rate). **Gate-check a real call returns tokens (reason/out > 0) before the full run, and monitor the first trials for `tok=0in` — abort if 402/zero-token recurs.**
+
+**Budget/settings:** default 128-turn (matches existing medium), `--reasoning-effort medium`, deepseek-v4-pro, rates 0.30/0.90. Run per-cell:
+```
+for cfg in baseline mechanics_hard mechanics_hard_format_only feedback_hard; do
+  .venv/bin/python -m scripts.run_real_ablation --env ka59simple --provider deepseek \
+    --model deepseek-v4-pro --reasoning-effort medium --configs "$cfg" --trials <gap+2> \
+    --input-cost-per-m 0.30 --output-cost-per-m 0.90 > /tmp/ka59s_medtop_$cfg.log 2>&1 &
+done; wait
+```
+(world_hard already ≥20 — don't rerun it.) These are slow (~2–3h/trial, heavy reasoning) → ~half a day.
+
+**AFTER it finishes:**
+1. Re-pool: real (non-zero-token) medium trials, dedup, take exactly 20/cell. Recompute win rates + Wilson CIs + Fisher (`scripts/wilson_cis.py`).
+2. Update `dashboard/jkj results - Detailed_Results.csv` + Overview (and push to VM `/home/exedev/`, restart `python3 app.py`).
+3. Update `results/figure_data/winrate_ci.csv` + regen `docs/ci_table.txt`.
+4. Update the **Google sheet** (source of truth) with the clean N=20 medium numbers.
+5. Heads-up to give team: until this finishes, KA59-Simple medium DeepSeek is 14–23, NOT a clean 20 (correct any "all done at 20" statement).
+Recipe + history: [[paper-ci-work-state]] memory. Do NOT touch Kaaus's paper prose ([[dont-ai-rewrite-coauthor-prose]]).
+
+---
+
 ## TL;DR — where we are
 - LS20 (env3) deepseek-v4-pro N=20 sweep: **DONE**, committed, dashboard updated (see `results/ls20_real_ablation/`, `dashboard/`).
 - CI tooling: `scripts/wilson_cis.py` **rewritten + fixed** (it was pointing at a non-existent CSV). Now reads the canonical `dashboard/jkj results - Detailed_Results.csv`, prints (1) a Wilson 95% CI table for every cell and (2) Fisher's-exact none-vs-medium primary comparisons. Pure stdlib (no scipy) — runs after a plain `git pull`.
