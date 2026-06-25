@@ -6,6 +6,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import sys
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from contextlib import redirect_stdout
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -26,12 +30,96 @@ ALL_CONFIGS: dict[str, dict[str, str]] = {
 }
 
 
+class _PrefixedWriter:
+    """Line-buffering stdout wrapper that tags each line with a trial prefix.
+
+    In parallel mode several worker processes share the terminal. Buffering
+    until a newline and writing the full `"[tN] line\\n"` in one call keeps the
+    per-turn logs readable and attributable instead of garbled mid-line.
+    """
+
+    def __init__(self, prefix: str, stream: Any) -> None:
+        self.prefix = prefix
+        self.stream = stream
+        self._buf = ""
+
+    def write(self, text: str) -> int:
+        self._buf += text
+        while "\n" in self._buf:
+            line, self._buf = self._buf.split("\n", 1)
+            self.stream.write(f"{self.prefix}{line}\n")
+        self.stream.flush()
+        return len(text)
+
+    def flush(self) -> None:
+        if self._buf:
+            self.stream.write(f"{self.prefix}{self._buf}")
+            self._buf = ""
+        self.stream.flush()
+
+
+def _run_single_trial(task: dict[str, Any]) -> dict[str, Any]:
+    """Run one trial in isolation and persist it.
+
+    Executed in a separate process: it builds its own env (via run_agent ->
+    _make_env), saves its own result file, and returns only a small summary so
+    the large `history` payload never crosses the process boundary.
+    """
+    cfg = task["cfg"]
+
+    def _do() -> Any:
+        result = run_agent(
+            world_level=cfg["world"],
+            goal_level=cfg["goal"],
+            mechanics_level=cfg["mechanics"],
+            feedback_level=cfg["feedback"],
+            provider=task["provider"],
+            model=task["model"],
+            reasoning_effort=task["reasoning_effort"],
+            max_levels=1,
+            verbose=task["verbose"],
+        )
+        path = save_result(result, run_id=task["run_id"])
+        return result, path
+
+    prefix = task.get("prefix")
+    if prefix:
+        writer = _PrefixedWriter(prefix, sys.stdout)
+        with redirect_stdout(writer):
+            result, path = _do()
+        writer.flush()
+    else:
+        result, path = _do()
+
+    return {
+        "trial": task["trial"],
+        "won": result.won,
+        "turns": result.turns,
+        "levels_completed": result.levels_completed,
+        "invalid_actions": result.invalid_actions,
+        "click_actions": result.click_actions,
+        "gravity_flips": result.gravity_flips,
+        "undos": result.undos,
+        "cost": _extract_cost(result),
+        "run_file": str(path),
+    }
+
+
+def _print_trial(tr: dict[str, Any]) -> None:
+    status = "WIN " if tr["won"] else "LOSS"
+    print(
+        f"  [t{tr['trial']}] -> {status} | turns: {tr['turns']} | "
+        f"levels: {tr['levels_completed']} | invalid: {tr['invalid_actions']}"
+    )
+
+
 def run_ablation(
     n_trials: int = 5,
     provider: str = "openrouter",
     model: str = "meta-llama/llama-3.3-70b-instruct:free",
     reasoning_efforts: list[str] | None = None,
     config_names: list[str] | None = None,
+    max_workers: int = 4,
     verbose: bool = True,
 ) -> None:
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
@@ -46,11 +134,10 @@ def run_ablation(
     }
 
     summary: list[dict[str, Any]] = []
-
     for reasoning_effort in efforts_to_run:
         print(f"\n{'#' * 62}")
         print(f"  Reasoning effort: {reasoning_effort}")
-        print(f"{'#' * 62}")
+        print(f"{('#' * 62)}")
 
         for cfg_name, cfg in configs_to_run.items():
             print(f"\n{'=' * 62}")
@@ -58,6 +145,47 @@ def run_ablation(
             print(f"  {cfg}")
             print(f"{'=' * 62}")
 
+            # Each trial runs in its own process with its own env (no shared
+            # state). Per-turn logging stays on; in parallel mode each worker's
+            # output is tagged with its trial number so concurrent runs stay
+            # readable instead of garbled.
+            tasks = [
+                {
+                    "trial": trial,
+                    "cfg": cfg,
+                    "run_id": f"{timestamp}_{cfg_name}_{reasoning_effort}_t{trial}",
+                    "provider": provider,
+                    "model": model,
+                    "reasoning_effort": reasoning_effort,
+                    "verbose": verbose,
+                    "prefix": f"[t{trial}] " if max_workers > 1 else None,
+                }
+                for trial in range(1, n_trials + 1)
+            ]
+
+            trial_results: dict[int, dict[str, Any]] = {}
+            if max_workers == 1:
+                for task in tasks:
+                    print(f"\n--- Trial {task['trial']}/{n_trials} ---")
+                    tr = _run_single_trial(task)
+                    trial_results[tr["trial"]] = tr
+                    _print_trial(tr)
+            else:
+                print(f"\n  Running {n_trials} trials with up to {max_workers} workers...")
+                with ProcessPoolExecutor(max_workers=max_workers) as executor:
+                    futures = {executor.submit(_run_single_trial, t): t["trial"] for t in tasks}
+                    for future in as_completed(futures):
+                        trial_no = futures[future]
+                        try:
+                            tr = future.result()
+                        except Exception as exc:
+                            print(f"  [t{trial_no}] FAILED: {exc}")
+                            continue
+                        trial_results[tr["trial"]] = tr
+                        _print_trial(tr)
+
+            # Aggregate in trial order so the saved summary is deterministic
+            # regardless of completion order.
             wins = 0
             total_turns = 0
             total_levels = 0
@@ -65,39 +193,25 @@ def run_ablation(
             total_clicks = 0
             total_gravity_flips = 0
             total_undos = 0
+            total_cost = 0.0
             run_files: list[str] = []
+            run_costs: list[float] = []
 
             for trial in range(1, n_trials + 1):
-                print(f"\n--- Trial {trial}/{n_trials} ---")
-                result = run_agent(
-                    world_level=cfg["world"],
-                    goal_level=cfg["goal"],
-                    mechanics_level=cfg["mechanics"],
-                    feedback_level=cfg["feedback"],
-                    provider=provider,
-                    model=model,
-                    reasoning_effort=reasoning_effort,
-                    max_levels=1,
-                    verbose=verbose,
-                )
-                run_id = f"{timestamp}_{cfg_name}_{reasoning_effort}_t{trial}"
-                path = save_result(result, run_id=run_id)
-                run_files.append(str(path))
-
-                if result.won:
+                tr = trial_results.get(trial)
+                if tr is None:
+                    continue
+                run_files.append(tr["run_file"])
+                run_costs.append(tr["cost"])
+                total_cost += tr["cost"]
+                if tr["won"]:
                     wins += 1
-                total_turns += result.turns
-                total_levels += result.levels_completed
-                total_invalid_actions += result.invalid_actions
-                total_clicks += result.click_actions
-                total_gravity_flips += result.gravity_flips
-                total_undos += result.undos
-
-                status = "WIN " if result.won else "LOSS"
-                print(
-                    f"  -> {status} | turns: {result.turns} | levels: {result.levels_completed} | "
-                    f"invalid: {result.invalid_actions}"
-                )
+                total_turns += tr["turns"]
+                total_levels += tr["levels_completed"]
+                total_invalid_actions += tr["invalid_actions"]
+                total_clicks += tr["click_actions"]
+                total_gravity_flips += tr["gravity_flips"]
+                total_undos += tr["undos"]
 
             cfg_summary: dict[str, Any] = {
                 "config_name": cfg_name,
@@ -114,6 +228,9 @@ def run_ablation(
                 "avg_click_actions": total_clicks / n_trials,
                 "avg_gravity_flips": total_gravity_flips / n_trials,
                 "avg_undos": total_undos / n_trials,
+                "total_cost": total_cost,
+                "avg_cost": total_cost / n_trials,
+                "run_costs": run_costs,
                 "run_files": run_files,
             }
             summary.append(cfg_summary)
@@ -124,6 +241,7 @@ def run_ablation(
                 f"avg_levels={cfg_summary['avg_levels_completed']:.1f} "
                 f"clicks={cfg_summary['avg_click_actions']:.1f} "
                 f"gravity_flips={cfg_summary['avg_gravity_flips']:.1f}"
+                f" cost={cfg_summary['avg_cost']}"
             )
 
     baseline_turns_by_effort = {
@@ -144,12 +262,12 @@ def run_ablation(
 
     print("\n" + "=" * 110)
     print(
-        f"{'Config':<20}  {'Reasoning':<10}  {'Win%':>5}  {'Avg turns':>9}  {'Avg levels':>10}  "
-        f"{'Invalid':>7}  {'Clicks':>7}  {'Flips':>7}  {'Undos':>7}  {'Rel. diff':>9}"
+        f"{ 'Config':<20}  {'Reasoning':<10}  {'Win%':>5}  {'Avg turns':>9}  {'Avg levels':>10}  "
+        f"{'Invalid':>7}  {'Clicks':>7}  {'Flips':>7}  {'Undos':>7}  {'Rel. diff':>9}  {'Cost'}"
     )
     print("-" * 110)
     for item in summary:
-        rel = f"{item['relative_difficulty']:.2f}x" if item["relative_difficulty"] is not None else "n/a"
+        rel = f"{item['relative_difficulty']:.2f}x" if item['relative_difficulty'] is not None else "n/a"
         print(
             f"{item['config_name']:<20}  "
             f"{item['reasoning_effort']:<10}  "
@@ -160,14 +278,53 @@ def run_ablation(
             f"{item['avg_click_actions']:>7.1f}  "
             f"{item['avg_gravity_flips']:>7.1f}  "
             f"{item['avg_undos']:>7.1f}  "
-            f"{rel:>9}"
+            f"{rel:>9}  "
+            f"{item.get('avg_cost', 0.0)}"
         )
     print("=" * 110)
 
 
+def _extract_cost(result: Any) -> float:
+    """Try several common shapes to extract a numeric cost from a result object.
+
+    Returns 0.0 when no cost can be found or conversion fails.
+    """
+    usage = None
+    # dict-like
+    try:
+        if isinstance(result, dict):
+            usage = result.get("usage")
+        else:
+            usage = getattr(result, "usage", None)
+    except Exception:
+        usage = None
+
+    cost = None
+    if isinstance(usage, dict):
+        cost = usage.get("cost")
+    else:
+        cost = getattr(usage, "cost", None) if usage is not None else None
+
+    # fallback into raw nested dicts sometimes returned by clients
+    if cost is None:
+        try:
+            raw = result.get("raw") if isinstance(result, dict) else getattr(result, "raw", None)
+            if isinstance(raw, dict):
+                usage2 = raw.get("usage")
+                if isinstance(usage2, dict):
+                    cost = usage2.get("cost")
+        except Exception:
+            pass
+
+    try:
+        return float(cost) if cost is not None else 0.0
+    except Exception:
+        return 0.0
+
+
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Run ablation study for Environment 4.")
-    p.add_argument("--trials", type=int, default=5)
+    p.add_argument("--trials", type=int, default=10)
     p.add_argument("--provider", default="openrouter", choices=["openrouter"])
     p.add_argument("--model", default="meta-llama/llama-3.3-70b-instruct:free")
     p.add_argument(
@@ -178,6 +335,13 @@ def _parse_args() -> argparse.Namespace:
         help="One or more reasoning effort levels to test.",
     )
     p.add_argument("--configs", nargs="+", choices=list(ALL_CONFIGS.keys()))
+    p.add_argument(
+        "--workers",
+        type=int,
+        default=4,
+        help="Parallel trials per config (each in its own process/env). "
+        "Use 1 for sequential. Keep modest to avoid API rate limits.",
+    )
     p.add_argument("--quiet", action="store_true")
     return p.parse_args()
 
@@ -190,5 +354,6 @@ if __name__ == "__main__":
         model=args.model,
         reasoning_efforts=args.reasoning_effort,
         config_names=args.configs,
+        max_workers=args.workers,
         verbose=not args.quiet,
     )
