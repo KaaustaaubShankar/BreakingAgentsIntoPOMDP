@@ -60,6 +60,24 @@ Respond each turn with a JSON object only:
 {"action": "<chosen action>", "target_position": [x, y] if CLICK}\
 """
 
+# Same as MECHANICS_HARD but retains the full CLICK protocol and action list.
+# Isolates transition-rule removal from action-format removal.
+MECHANICS_HARD_FORMAT_ONLY = """\
+Response protocol:
+Each turn, respond with a single JSON object only:
+{"reasoning": "<1-2 sentences>", "action": "MOVE_RIGHT"}
+
+For CLICK, include target_position in the SAME coordinates as `player.position`:
+{"reasoning": "Switch to the other selectable at [18, 21].", "action": "CLICK", "target_position": [18, 21]}
+
+Valid actions:
+- `MOVE_LEFT`
+- `MOVE_RIGHT`
+- `MOVE_UP`
+- `MOVE_DOWN`
+- `CLICK` with `"target_position": [x, y]` in grid/pixel coordinates (same system as `player.position` and `objects.*[*].position`)\
+"""
+
 MECHANICS_OODA_F = """\
 Each turn, respond with a JSON object only using this exact structure:
 {"observe": "<what changed since last turn>", "orient": "<your current hypothesis about how this world works>", "decide": "<what you will do and why>", "action": "<ACTION_NAME>", "target_position": [x, y] if CLICK}
@@ -143,6 +161,8 @@ def build_system_prompt(goal_level: str, mechanics_level: str) -> str:
         parts.append(MECHANICS_OODA)
     elif mechanics_level == "EASY":
         parts.append(MECHANICS_EASY)
+    elif mechanics_level == "HARD_FORMAT_ONLY":
+        parts.append(MECHANICS_HARD_FORMAT_ONLY)
     else:
         parts.append(MECHANICS_HARD)
     return "\n\n".join(parts)

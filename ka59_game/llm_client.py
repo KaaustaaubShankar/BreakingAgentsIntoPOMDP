@@ -40,6 +40,7 @@ class LLMClient:
             "input_tokens": 0,
             "output_tokens": 0,
             "reasoning_tokens": 0,
+            "cached_tokens": 0,
             "total_tokens": 0,
             "calls": 0,
             "calls_with_usage": 0,
@@ -65,11 +66,18 @@ class LLMClient:
         details = (usage.get("completion_tokens_details") if isinstance(usage, dict)
                    else getattr(usage, "completion_tokens_details", None))
         reasoning_tokens = (_val(details, "reasoning_tokens") or 0) if details is not None else 0
+        # OpenRouter/OpenAI report prompt-cache hits under prompt_tokens_details.
+        # cached_tokens is the portion of input_tokens served from cache (billed
+        # at a discount), so it lets us verify prompt caching is actually landing.
+        prompt_details = (usage.get("prompt_tokens_details") if isinstance(usage, dict)
+                          else getattr(usage, "prompt_tokens_details", None))
+        cached_tokens = (_val(prompt_details, "cached_tokens") or 0) if prompt_details is not None else 0
         has_usage = usage is not None and any(x > 0 for x in (input_tokens, output_tokens, total_tokens))
         return {
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "reasoning_tokens": reasoning_tokens,
+            "cached_tokens": cached_tokens,
             "total_tokens": total_tokens,
             "calls": 1,
             "calls_with_usage": 1 if has_usage else 0,
@@ -417,11 +425,21 @@ class LLMClient:
             ],
             max_tokens=4096 if _high_effort else 1024,
         )
+        extra_body: Dict[str, Any] = {}
         if self.reasoning_effort:
             # OpenRouter unified reasoning param works for all supported
             # providers (OpenAI gpt-5.x, xAI Grok, Anthropic). Pass via
             # extra_body since OpenAI Python SDK has no top-level `reasoning`.
-            kwargs["extra_body"] = {"reasoning": {"effort": self.reasoning_effort}}
+            extra_body["reasoning"] = {"effort": self.reasoning_effort}
+        # Pin OpenAI-hosted models to the OpenAI upstream. A prompt cache only
+        # lives on the backend that created it, so consistent routing is what
+        # makes caching actually land across turns/trials; it also keeps the
+        # serving backend reproducible across runs and avoids the flaky
+        # third-party resellers that previously returned zero-token responses.
+        if self.model.startswith("openai/"):
+            extra_body["provider"] = {"order": ["OpenAI"], "allow_fallbacks": False}
+        if extra_body:
+            kwargs["extra_body"] = extra_body
         for attempt in range(4):
             try:
                 response = self._openrouter_client().chat.completions.create(**kwargs)

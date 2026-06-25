@@ -86,6 +86,7 @@ class RunResult:
     input_tokens: int = 0
     output_tokens: int = 0
     reasoning_tokens: int = 0
+    cached_tokens: int = 0
 
 
 def save_result(result: RunResult, run_id: Optional[str] = None) -> Path:
@@ -121,6 +122,7 @@ def save_result(result: RunResult, run_id: Optional[str] = None) -> Path:
         "input_tokens": result.input_tokens,
         "output_tokens": result.output_tokens,
         "reasoning_tokens": result.reasoning_tokens,
+        "cached_tokens": result.cached_tokens,
         "history": result.history,
     }
     path.write_text(json.dumps(payload, indent=2))
@@ -629,6 +631,7 @@ def run_agent(
     result.input_tokens = usage.get("input_tokens", 0)
     result.output_tokens = usage.get("output_tokens", 0)
     result.reasoning_tokens = usage.get("reasoning_tokens", 0)
+    result.cached_tokens = usage.get("cached_tokens", 0)
     try:
         save_result(result)
     except Exception as exc:
