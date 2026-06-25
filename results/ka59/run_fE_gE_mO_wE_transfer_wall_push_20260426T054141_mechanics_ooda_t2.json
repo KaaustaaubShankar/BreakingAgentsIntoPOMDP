@@ -1,0 +1,397 @@
+{
+  "config": {
+    "scenario": "transfer_wall_push",
+    "world": "EASY",
+    "goal": "EASY",
+    "mechanics": "OODA",
+    "feedback": "EASY",
+    "target_x": 6
+  },
+  "won": true,
+  "turns": 3,
+  "levels_completed": 1,
+  "provider": "xai",
+  "model": "grok-4-1-fast",
+  "timestamp": "2026-04-26T05:48:10.177106+00:00",
+  "errors": [],
+  "understanding": {
+    "goal_understanding": "Get any pushable object (the selected piece or any pushable block) to reach or exceed the target_x coordinate.",
+    "mechanics_understanding": "Movement actions displace the selected piece by 3 units in the specified direction (MOVE_UP: y -= 3, MOVE_RIGHT: x += 3) without resistance. No pushing of blocks or wall collisions observed in these turns. Each action consumes 1 step from the budget. Scenario ended after 2 turns, likely due to reaching target_x with the selected piece."
+  },
+  "invalid_actions": 0,
+  "select_actions": 0,
+  "push_events": 0,
+  "moves_blocked": 0,
+  "orient_history": [
+    "Sokoban-like grid puzzle with 3-unit (cell) cardinal moves. Snap to grid centers. Blocks/pushables movable if target clear; walls immovable. right_blocked indicates push impossible (pb can't move right into wt). Open up/down/left allow y-change to bypass y=0 obstacles. Win: any pushable (sel or pb) x>=6 regardless of y.",
+    "Grid-based world with 3-pixel cells (positions are left/top edges, moves shift by 3 pixels). Controllables (selected piece) and blocks are pushable; goal met when any's x >= 6. Walls block movement/pushing. Currently above the block/wall row (y=-3 vs y=0), open path rightward along y=-3 to bypass obstacles and reach x=6 directly with selected piece. No collisions on right moves from here.",
+    "2D pixel-grid world (3 pixels=1 cell/step). Controllables ('sel') move 3 units/cardinal dir to *_target if not blocked. Blocks/walls block movement unless pushed (adjacent + move into). Any pushable (sel/blocks) reaching x>=target_x wins. Efficient 3-unit cell moves; down blocked by 'pb', right/up/left open. Scenario 'transfer_wall_push' likely involves pushing block past wall, but direct sel right wins immediately."
+  ],
+  "discovery_turn": 1,
+  "history": [
+    {
+      "timestamp": "2026-04-26T05:48:10.177221+00:00",
+      "type": "game_start",
+      "summary": "KA59 scenario=transfer_wall_push started.",
+      "config": {
+        "scenario": "transfer_wall_push",
+        "world": "EASY",
+        "goal": "EASY",
+        "mechanics": "OODA",
+        "feedback": "EASY",
+        "target_x": 6
+      }
+    },
+    {
+      "timestamp": "2026-04-26T05:48:50.005473+00:00",
+      "type": "action",
+      "summary": "Turn 1: MOVE_UP | Bypass pb/wt via y=-3: MOVE_UP to [0,-3] (open), then MOVE_RIGHT to [3,-3], MOVE_RIGHT to [6,-3] (sel.x=6 wins). 3 steps efficient.",
+      "turn": 1,
+      "action": "MOVE_UP",
+      "target_id": null,
+      "reasoning": "",
+      "observe": "Initial state: sel at [0,0], pb at [3,0], wt at [6,0]. right_blocked=true due to adjacent_right pb; other directions unblocked. Target_x=6.",
+      "orient": "Sokoban-like grid puzzle with 3-unit (cell) cardinal moves. Snap to grid centers. Blocks/pushables movable if target clear; walls immovable. right_blocked indicates push impossible (pb can't move right into wt). Open up/down/left allow y-change to bypass y=0 obstacles. Win: any pushable (sel or pb) x>=6 regardless of y.",
+      "decide": "Bypass pb/wt via y=-3: MOVE_UP to [0,-3] (open), then MOVE_RIGHT to [3,-3], MOVE_RIGHT to [6,-3] (sel.x=6 wins). 3 steps efficient.",
+      "state_before": {
+        "player": {
+          "id": "sel",
+          "position": [
+            0,
+            0
+          ],
+          "size": [
+            3,
+            3
+          ]
+        },
+        "movement": {
+          "left_target": [
+            -3,
+            0
+          ],
+          "right_target": [
+            3,
+            0
+          ],
+          "up_target": [
+            0,
+            -3
+          ],
+          "down_target": [
+            0,
+            3
+          ],
+          "left_blocked": false,
+          "right_blocked": true,
+          "up_blocked": false,
+          "down_blocked": false,
+          "adjacent_left_ids": [],
+          "adjacent_right_ids": [
+            "pb"
+          ],
+          "adjacent_up_ids": [],
+          "adjacent_down_ids": []
+        },
+        "level": {
+          "scenario": "transfer_wall_push",
+          "target_x": 6
+        },
+        "resources": {
+          "step_budget": 10,
+          "steps_used": 0,
+          "steps_remaining": 10
+        },
+        "objects": {
+          "walls": [
+            {
+              "id": "wt",
+              "position": [
+                6,
+                0
+              ],
+              "size": [
+                3,
+                3
+              ],
+              "kind": "wall",
+              "is_selected": false
+            }
+          ],
+          "blocks": [
+            {
+              "id": "pb",
+              "position": [
+                3,
+                0
+              ],
+              "size": [
+                3,
+                3
+              ],
+              "kind": "block",
+              "is_selected": false
+            }
+          ],
+          "controllables": [
+            {
+              "id": "sel",
+              "position": [
+                0,
+                0
+              ],
+              "size": [
+                3,
+                3
+              ],
+              "kind": "controllable",
+              "is_selected": true
+            }
+          ]
+        },
+        "semantic_grid": [
+          "PB#"
+        ],
+        "game_state": "IN_PROGRESS"
+      }
+    },
+    {
+      "timestamp": "2026-04-26T05:49:19.910987+00:00",
+      "type": "action",
+      "summary": "Turn 2: MOVE_RIGHT | MOVE_RIGHT to [3, -3]; positions selected piece at x=3 (still <6). Next turn MOVE_RIGHT to [6, -3] for x=6 win. Efficient (2 more steps, total 3/10); avoids potential block/wall push issues.",
+      "turn": 2,
+      "action": "MOVE_RIGHT",
+      "target_id": null,
+      "reasoning": "",
+      "observe": "Selected piece moved up from [0, 0] to [0, -3] as a result of previous MOVE_UP. No other changes; block still at [3, 0], wall at [6, 0]. No adjacencies detected. Steps remaining: 9.",
+      "orient": "Grid-based world with 3-pixel cells (positions are left/top edges, moves shift by 3 pixels). Controllables (selected piece) and blocks are pushable; goal met when any's x >= 6. Walls block movement/pushing. Currently above the block/wall row (y=-3 vs y=0), open path rightward along y=-3 to bypass obstacles and reach x=6 directly with selected piece. No collisions on right moves from here.",
+      "decide": "MOVE_RIGHT to [3, -3]; positions selected piece at x=3 (still <6). Next turn MOVE_RIGHT to [6, -3] for x=6 win. Efficient (2 more steps, total 3/10); avoids potential block/wall push issues.",
+      "state_before": {
+        "player": {
+          "id": "sel",
+          "position": [
+            0,
+            -3
+          ],
+          "size": [
+            3,
+            3
+          ]
+        },
+        "movement": {
+          "left_target": [
+            -3,
+            -3
+          ],
+          "right_target": [
+            3,
+            -3
+          ],
+          "up_target": [
+            0,
+            -6
+          ],
+          "down_target": [
+            0,
+            0
+          ],
+          "left_blocked": false,
+          "right_blocked": false,
+          "up_blocked": false,
+          "down_blocked": false,
+          "adjacent_left_ids": [],
+          "adjacent_right_ids": [],
+          "adjacent_up_ids": [],
+          "adjacent_down_ids": []
+        },
+        "level": {
+          "scenario": "transfer_wall_push",
+          "target_x": 6
+        },
+        "resources": {
+          "step_budget": 10,
+          "steps_used": 1,
+          "steps_remaining": 9
+        },
+        "objects": {
+          "walls": [
+            {
+              "id": "wt",
+              "position": [
+                6,
+                0
+              ],
+              "size": [
+                3,
+                3
+              ],
+              "kind": "wall",
+              "is_selected": false
+            }
+          ],
+          "blocks": [
+            {
+              "id": "pb",
+              "position": [
+                3,
+                0
+              ],
+              "size": [
+                3,
+                3
+              ],
+              "kind": "block",
+              "is_selected": false
+            }
+          ],
+          "controllables": [
+            {
+              "id": "sel",
+              "position": [
+                0,
+                -3
+              ],
+              "size": [
+                3,
+                3
+              ],
+              "kind": "controllable",
+              "is_selected": true
+            }
+          ]
+        },
+        "semantic_grid": [
+          ".B#"
+        ],
+        "game_state": "IN_PROGRESS"
+      }
+    },
+    {
+      "timestamp": "2026-04-26T05:49:30.245485+00:00",
+      "type": "action",
+      "summary": "Turn 3: MOVE_RIGHT | MOVE_RIGHT: advances sel to [6, -3] (x=6>=target_x), wins instantly. Right clear, no blocks/walls in path. Ignores pb for now as direct win cheaper than pushing.",
+      "turn": 3,
+      "action": "MOVE_RIGHT",
+      "target_id": null,
+      "reasoning": "",
+      "observe": "Selected piece moved right from [0, -3] to [3, -3]. Now adjacent down to block 'pb' at [3, 0], down_blocked=true. Right_target=[6, -3] clear (right_blocked=false, no adjacent right). Wall 'wt' at [6, 0].",
+      "orient": "2D pixel-grid world (3 pixels=1 cell/step). Controllables ('sel') move 3 units/cardinal dir to *_target if not blocked. Blocks/walls block movement unless pushed (adjacent + move into). Any pushable (sel/blocks) reaching x>=target_x wins. Efficient 3-unit cell moves; down blocked by 'pb', right/up/left open. Scenario 'transfer_wall_push' likely involves pushing block past wall, but direct sel right wins immediately.",
+      "decide": "MOVE_RIGHT: advances sel to [6, -3] (x=6>=target_x), wins instantly. Right clear, no blocks/walls in path. Ignores pb for now as direct win cheaper than pushing.",
+      "state_before": {
+        "player": {
+          "id": "sel",
+          "position": [
+            3,
+            -3
+          ],
+          "size": [
+            3,
+            3
+          ]
+        },
+        "movement": {
+          "left_target": [
+            0,
+            -3
+          ],
+          "right_target": [
+            6,
+            -3
+          ],
+          "up_target": [
+            3,
+            -6
+          ],
+          "down_target": [
+            3,
+            0
+          ],
+          "left_blocked": false,
+          "right_blocked": false,
+          "up_blocked": false,
+          "down_blocked": true,
+          "adjacent_left_ids": [],
+          "adjacent_right_ids": [],
+          "adjacent_up_ids": [],
+          "adjacent_down_ids": [
+            "pb"
+          ]
+        },
+        "level": {
+          "scenario": "transfer_wall_push",
+          "target_x": 6
+        },
+        "resources": {
+          "step_budget": 10,
+          "steps_used": 2,
+          "steps_remaining": 8
+        },
+        "objects": {
+          "walls": [
+            {
+              "id": "wt",
+              "position": [
+                6,
+                0
+              ],
+              "size": [
+                3,
+                3
+              ],
+              "kind": "wall",
+              "is_selected": false
+            }
+          ],
+          "blocks": [
+            {
+              "id": "pb",
+              "position": [
+                3,
+                0
+              ],
+              "size": [
+                3,
+                3
+              ],
+              "kind": "block",
+              "is_selected": false
+            }
+          ],
+          "controllables": [
+            {
+              "id": "sel",
+              "position": [
+                3,
+                -3
+              ],
+              "size": [
+                3,
+                3
+              ],
+              "kind": "controllable",
+              "is_selected": true
+            }
+          ]
+        },
+        "semantic_grid": [
+          ".B#"
+        ],
+        "game_state": "IN_PROGRESS"
+      }
+    },
+    {
+      "timestamp": "2026-04-26T05:49:30.245672+00:00",
+      "type": "win",
+      "summary": "WIN after 3 turns."
+    },
+    {
+      "timestamp": "2026-04-26T05:49:36.435054+00:00",
+      "type": "understanding",
+      "summary": "Agent explained goal and mechanics.",
+      "understanding": {
+        "goal_understanding": "Get any pushable object (the selected piece or any pushable block) to reach or exceed the target_x coordinate.",
+        "mechanics_understanding": "Movement actions displace the selected piece by 3 units in the specified direction (MOVE_UP: y -= 3, MOVE_RIGHT: x += 3) without resistance. No pushing of blocks or wall collisions observed in these turns. Each action consumes 1 step from the budget. Scenario ended after 2 turns, likely due to reaching target_x with the selected piece."
+      }
+    }
+  ]
+}

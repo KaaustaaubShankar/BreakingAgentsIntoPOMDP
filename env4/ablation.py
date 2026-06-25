@@ -325,7 +325,7 @@ def _extract_cost(result: Any) -> float:
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Run ablation study for Environment 4.")
     p.add_argument("--trials", type=int, default=10)
-    p.add_argument("--provider", default="openrouter", choices=["openrouter"])
+    p.add_argument("--provider", default="openrouter", choices=["openrouter", "qwen-local"])
     p.add_argument("--model", default="meta-llama/llama-3.3-70b-instruct:free")
     p.add_argument(
         "--reasoning-effort",
