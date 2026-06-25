@@ -1,14 +1,21 @@
 """
 Real-game KA59 ablation sweep.
 
-Calls ka59_game.experiment.run_agent directly (no multi-env dispatcher) and
-writes both an aggregated summary and a per-config sidecar JSON, plus a
-per-trial JSON via experiment.save_result(). Per-trial JSON contains the
-full event history (orient texts, forced reframes, action timeline) needed
-for the verbal-vs-behavioral compliance benchmark.
+Calls ka59_game.experiment.run_agent directly and writes both an aggregated
+summary and a per-config sidecar JSON, plus a per-trial JSON via
+experiment.save_result(). Per-trial JSON contains the full event history
+(orient texts, forced reframes, action timeline) needed for the
+verbal-vs-behavioral compliance benchmark.
 
 Usage:
     python3 -m scripts.run_real_ablation --provider xai --model grok-4-1-fast --trials 2
+    python3 -m scripts.run_real_ablation --env ka59simple --provider xai --model grok-4-1-fast --trials 2
+
+Environments (--env):
+    ka59        canonical 7-level KA59 (used for n=30+ baseline runs from 2026-04-28;
+                floor-effects to 0% win-rate across all conditions/models)
+    ka59simple  single-goal fork that removes the multi-target click sequence,
+                preserving all 4 ablation axes — used to escape the floor effect
 
 Available --configs:
     baseline, world_hard, goal_hard, mechanics_hard, mechanics_ooda,
@@ -37,7 +44,12 @@ ALL_CONFIGS = {
     "feedback_hard":    {"world": "EASY", "goal": "EASY", "mechanics": "EASY",   "feedback": "HARD"},
 }
 
-RESULTS_DIR = repo_root / "results" / "ka59_real_ablation"
+ENV_CHOICES = ["ka59", "ka59simple"]
+
+
+def _results_dir(env_id: str) -> Path:
+    folder = "ka59_real_ablation" if env_id == "ka59" else f"{env_id}_real_ablation"
+    return repo_root / "results" / folder
 
 
 def run_ablation(
@@ -47,13 +59,19 @@ def run_ablation(
     verbose: bool = False,
     max_turns: int = 64,
     configs: list | None = None,
+    reasoning_effort: str | None = None,
+    env_id: str = "ka59",
 ) -> dict:
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+    results_dir = _results_dir(env_id)
+    results_dir.mkdir(parents=True, exist_ok=True)
+    # Microsecond precision so two parallel ablation processes started in the
+    # same second (e.g. when launched as background jobs from the same shell)
+    # don't write to the same ablation_*.json filename and clobber each other.
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S_%f")
     summary: dict = {}
 
     print(f"\n{'='*60}")
-    print(f"KA59 REAL-GAME ABLATION")
+    print(f"KA59 REAL-GAME ABLATION  (env={env_id})")
     print(f"Provider: {provider}  Model: {model}  Trials: {n_trials}")
     print(f"{'='*60}\n")
 
@@ -64,6 +82,9 @@ def run_ablation(
         levels_list: list[int] = []
         click_actions_total = 0
         moves_blocked_total = 0
+        object_pushes_total = 0
+        wall_transfers_total = 0
+        max_goals_occupied_per_trial: list[int] = []
         forced_reframes_total = 0
         discovery_turns_observed: list[int] = []
         trials_data: list[dict] = []
@@ -83,6 +104,8 @@ def run_ablation(
                     max_levels=1,
                     turns_per_level=max_turns,
                     verbose=verbose,
+                    reasoning_effort=reasoning_effort,
+                    env_id=env_id,
                 )
                 if result.won:
                     wins += 1
@@ -90,6 +113,9 @@ def run_ablation(
                 levels_list.append(result.levels_completed)
                 click_actions_total += result.click_actions
                 moves_blocked_total += result.moves_blocked
+                object_pushes_total += result.object_pushes
+                wall_transfers_total += result.wall_transfers
+                max_goals_occupied_per_trial.append(result.max_goals_occupied)
                 forced_reframes_total += result.forced_reframes
                 d_turn = result.discovery_turn
                 if d_turn is not None:
@@ -110,10 +136,15 @@ def run_ablation(
                     "levels_completed": result.levels_completed,
                     "passable_walls": result.click_actions,
                     "blocked": result.moves_blocked,
+                    "object_pushes": result.object_pushes,
+                    "wall_transfers": result.wall_transfers,
+                    "max_goals_occupied": result.max_goals_occupied,
                     "forced_reframes": result.forced_reframes,
                     "discovery_turn": d_turn,
                 })
             except Exception as e:
+                import traceback
+                traceback.print_exc()
                 print(f"  trial {i+1}: ERROR — {e}")
                 sys.stdout.flush()
                 trials_data.append({"trial": i + 1, "error": str(e)})
@@ -138,6 +169,12 @@ def run_ablation(
             "avg_levels_completed": round(avg_levels, 2),
             "passable_walls_total": click_actions_total,
             "blocked_total": moves_blocked_total,
+            "object_pushes_total": object_pushes_total,
+            "wall_transfers_total": wall_transfers_total,
+            "avg_max_goals_occupied": (
+                round(sum(max_goals_occupied_per_trial) / len(max_goals_occupied_per_trial), 2)
+                if max_goals_occupied_per_trial else 0
+            ),
             "forced_reframes_total": forced_reframes_total,
             "discovery_rate": round(discovery_rate, 3),
             "avg_discovery_turn": (
@@ -147,9 +184,9 @@ def run_ablation(
         }
 
         try:
-            sidecar = RESULTS_DIR / f"sidecar_{provider}_{model.replace('/', '_')}_{timestamp}_{cfg_name}.json"
+            sidecar = results_dir / f"sidecar_{provider}_{model.replace('/', '_')}_{timestamp}_{cfg_name}.json"
             sidecar.write_text(json.dumps({
-                "provider": provider, "model": model, "config": cfg_name,
+                "provider": provider, "model": model, "env_id": env_id, "config": cfg_name,
                 "timestamp": timestamp, "n_trials": n_trials,
                 **summary[cfg_name],
             }, indent=2))
@@ -168,10 +205,11 @@ def run_ablation(
         "model": model,
         "n_trials": n_trials,
         "timestamp": timestamp,
-        "env": "ka59_real_game",
+        "env": f"{env_id}_real_game",
+        "env_id": env_id,
         "results": summary,
     }
-    out_path = RESULTS_DIR / f"ablation_{provider}_{model.replace('/', '_')}_{timestamp}.json"
+    out_path = results_dir / f"ablation_{provider}_{model.replace('/', '_')}_{timestamp}.json"
     out_path.write_text(json.dumps(out, indent=2))
     print(f"\nResults saved → {out_path}")
 
@@ -195,9 +233,17 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--provider", default="xai")
     parser.add_argument("--model", default="grok-4-1-fast")
+    parser.add_argument("--env", default="ka59", choices=ENV_CHOICES,
+                        help="Which env to ablate. 'ka59' = canonical (floor-effects on win-rate); "
+                             "'ka59simple' = single-goal fork to escape floor effect.")
     parser.add_argument("--trials", type=int, default=2)
     parser.add_argument("--max-turns", type=int, default=64, dest="max_turns")
     parser.add_argument("--configs", nargs="+", default=None, choices=list(ALL_CONFIGS.keys()))
+    parser.add_argument("--reasoning-effort", default=None,
+                        choices=["none", "minimal", "low", "medium", "high", "xhigh"],
+                        dest="reasoning_effort",
+                        help="OpenAI/Grok reasoning effort. 'none' disables reasoning on supported models (gpt-5.x). Omit to use model default.")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
-    run_ablation(args.provider, args.model, args.trials, args.verbose, args.max_turns, args.configs)
+    run_ablation(args.provider, args.model, args.trials, args.verbose, args.max_turns,
+                 args.configs, args.reasoning_effort, env_id=args.env)
