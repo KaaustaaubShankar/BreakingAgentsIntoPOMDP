@@ -88,17 +88,19 @@ _data_pct = {
     "KA59-Simple": {
         "rows": ["GPT-5.2 (med)", "GPT-5.2 (none)", "Deepseek (med)", "Deepseek (none)"],
         "cols": ["BASELINE", "WORLD_HARD", "MECHANICS_HARD", "MECHANICS_HARD\n_NORULES", "FEEDBACK_HARD"],
+        # Corrected to clean single-run-sets (no cross-run pooling):
+        # GPT-5.2 is N=5 per effort (run 20260513T055440); Deepseek N=20 (direct API).
         "pcts": [
-            [ 90,  0,   0, 0,  80],
-            [ 90,  0,   0,    0,  80],
-            [ 20,  0,   0,    0,  10],
-            [ 60,  0,  20,   20,  75],
+            [ 80,  0,   0,   0, 100],   # GPT-5.2 (med)  N=5
+            [100,  0,   0,   0,  60],   # GPT-5.2 (none) N=5
+            [ 10,  0,   0,   0,   5],   # Deepseek (med)  N=20 (clean)
+            [ 60,  0,  20,  20,  75],   # Deepseek (none) N=20
         ],
         "ns": [
-            [10, 10, 10, 10, 10],
-            [10, 10, 10,   10, 10],
-            [20, 20, 20,   20, 20],
-            [20, 20, 20,   20, 20],
+            [ 5,  5,  5,  5,  5],
+            [ 5,  5,  5,  5,  5],
+            [20, 20, 20, 20, 20],
+            [20, 20, 20, 20, 20],
         ],
     },
 }
