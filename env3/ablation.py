@@ -1,37 +1,43 @@
 """
 ablation.py — Ablation study runner for Environment 3 (Grid Navigator / ls20).
 
-Mirrors the structure of Zendo's ablation_study.py for cross-environment
-result consistency.
+Mirrors scripts/run_real_ablation.py (the KA59/ka59simple runner) so LS20 rows
+slot into the same cross-environment "Josh table": reasoning-effort sweep,
+per-trial token + cost tracking, and collision-safe output filenames.
 
-Configs tested:
-  1. Baseline       — all axes EASY
-  2. World HARD     — hard world,     rest EASY
-  3. Goal HARD      — hard goal,      rest EASY
-  4. Mechanics HARD — hard mechanics, rest EASY
-  5. Feedback HARD  — hard feedback,  rest EASY
+Configs (four-axis knockout; goal_hard dropped per meeting, kept opt-in):
+  1. baseline       — all axes EASY
+  2. world_hard     — hard world,     rest EASY
+  3. mechanics_hard — hard mechanics, rest EASY
+  4. feedback_hard  — hard feedback,  rest EASY
+  (goal_hard available via --configs but excluded from the default set)
 
 Usage:
-  python ablation.py                        # 5 trials per config, default model
-  python ablation.py --trials 10            # more trials
-  python ablation.py --model openai/gpt-4o  # different model via OpenRouter
-  python ablation.py --configs baseline world_hard  # run specific configs only
+  python ablation.py                                    # default: deepseek-v4-pro, none+medium, N=20
+  python ablation.py --configs baseline --reasoning-effort none   # one cell
+  python ablation.py --trials 5 --model openai/gpt-5.2
+
+Launch cells in parallel (one process per config × effort) for wall-time; the
+PID in each output filename keeps parallel summaries from clobbering each other.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from experiment import RunResult, run_agent, save_result
+from experiment import run_agent, save_result
 
 RESULTS_DIR = Path("results")
 RESULTS_DIR.mkdir(exist_ok=True)
 
-# All configs to test: name → axis overrides (rest default to EASY)
+REASONING_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh"]
+
+# All configs: name → axis overrides (rest default to EASY).
 ALL_CONFIGS: dict[str, dict[str, str]] = {
     "baseline":       {"world": "EASY", "goal": "EASY", "mechanics": "EASY", "feedback": "EASY"},
     "world_hard":     {"world": "HARD", "goal": "EASY", "mechanics": "EASY", "feedback": "EASY"},
@@ -40,142 +46,164 @@ ALL_CONFIGS: dict[str, dict[str, str]] = {
     "feedback_hard":  {"world": "EASY", "goal": "EASY", "mechanics": "EASY", "feedback": "HARD"},
 }
 
+# goal_hard dropped per meeting — matches the ka59simple knockout.
+DEFAULT_CONFIGS = ["baseline", "world_hard", "mechanics_hard", "feedback_hard"]
+
 
 def run_ablation(
-    n_trials: int = 5,
+    n_trials: int = 20,
     provider: str = "openrouter",
-    model: str = "meta-llama/llama-3.3-70b-instruct:free",
+    model: str = "deepseek/deepseek-v4-pro",
     config_names: list[str] | None = None,
+    reasoning_efforts: list[str] | None = None,
+    input_cost_per_m: float = 0.30,
+    output_cost_per_m: float = 0.90,
     verbose: bool = True,
 ) -> None:
-    """
-    Run the full ablation study and save individual run JSONs plus a summary.
+    """Run the ablation sweep and save per-trial run JSONs plus a summary."""
+    efforts = [e.lower().strip() for e in (reasoning_efforts or ["none", "medium"])]
+    invalid = [e for e in efforts if e not in REASONING_EFFORTS]
+    if invalid:
+        raise ValueError(f"Invalid reasoning_effort(s): {invalid}. Expected {REASONING_EFFORTS}.")
 
-    Args:
-        n_trials:     Number of independent trials per configuration.
-        model:        OpenRouter model identifier.
-        config_names: Subset of config names to run (default: all).
-        verbose:      Print per-turn agent actions to stdout.
-    """
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
     configs_to_run = {
         k: v for k, v in ALL_CONFIGS.items()
-        if config_names is None or k in config_names
+        if (config_names or DEFAULT_CONFIGS) and k in (config_names or DEFAULT_CONFIGS)
     }
+
+    # Microsecond timestamp + PID so parallel cells never clobber each other.
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S_%f")
+    run_tag = f"{timestamp}_p{os.getpid()}"
+
+    print(f"\n{'='*62}")
+    print(f"LS20 (env3) ABLATION  provider={provider}  model={model}")
+    print(f"efforts={efforts}  configs={list(configs_to_run)}  trials={n_trials}")
+    print(f"{'='*62}")
 
     summary: list[dict[str, Any]] = []
 
-    for cfg_name, cfg in configs_to_run.items():
-        print(f"\n{'='*62}")
-        print(f"  Config: {cfg_name}")
-        print(f"  {cfg}")
-        print(f"{'='*62}")
+    for effort in efforts:
+        for cfg_name, cfg in configs_to_run.items():
+            print(f"\n{'='*62}\n  {effort}::{cfg_name}  {cfg}\n{'='*62}")
 
-        wins = 0
-        total_turns = 0
-        total_levels = 0
-        total_wall_collisions = 0
-        total_goals_activated = 0
-        run_files: list[str] = []
+            wins = 0
+            total_turns = 0
+            total_levels = 0
+            total_wall_collisions = 0
+            total_goals_activated = 0
+            total_in = total_out = total_reason = 0
+            total_cost = 0.0
+            run_files: list[str] = []
+            won_turns: list[int] = []
 
-        for trial in range(1, n_trials + 1):
-            print(f"\n--- Trial {trial}/{n_trials} ---")
-            result = run_agent(
-                world_level=cfg["world"],
-                goal_level=cfg["goal"],
-                mechanics_level=cfg["mechanics"],
-                feedback_level=cfg["feedback"],
-                provider=provider,
-                model=model,
-                max_levels=1,
-                verbose=verbose,
-            )
-            run_id = f"{timestamp}_{cfg_name}_t{trial}"
-            path = save_result(result, run_id=run_id)
-            run_files.append(str(path))
+            for trial in range(1, n_trials + 1):
+                print(f"\n--- {effort}::{cfg_name} trial {trial}/{n_trials} ---")
+                result = run_agent(
+                    world_level=cfg["world"],
+                    goal_level=cfg["goal"],
+                    mechanics_level=cfg["mechanics"],
+                    feedback_level=cfg["feedback"],
+                    provider=provider,
+                    model=model,
+                    reasoning_effort=effort,
+                    max_levels=1,
+                    verbose=verbose,
+                )
+                run_id = f"{run_tag}_{effort}_{cfg_name}_t{trial}"
+                run_files.append(str(save_result(result, run_id=run_id)))
 
-            if result.won:
-                wins += 1
-            total_turns += result.turns
-            total_levels += result.levels_completed
-            total_wall_collisions += result.wall_collisions
-            total_goals_activated += result.goals_ever_activated
+                trial_cost = (
+                    result.input_tokens / 1e6 * input_cost_per_m
+                    + result.output_tokens / 1e6 * output_cost_per_m
+                )
+                if result.won:
+                    wins += 1
+                    won_turns.append(result.turns)
+                total_turns += result.turns
+                total_levels += result.levels_completed
+                total_wall_collisions += result.wall_collisions
+                total_goals_activated += result.goals_ever_activated
+                total_in += result.input_tokens
+                total_out += result.output_tokens
+                total_reason += result.reasoning_tokens
+                total_cost += trial_cost
 
-            status = "WIN " if result.won else "LOSS"
-            print(f"  → {status} | turns: {result.turns} | "
-                  f"levels: {result.levels_completed}")
+                status = "WIN " if result.won else "LOSS"
+                print(f"  → {status} | turns: {result.turns} | levels: {result.levels_completed} "
+                      f"| tok={result.input_tokens}in/{result.output_tokens}out"
+                      f"/{result.reasoning_tokens}reason | ${trial_cost:.4f}")
 
-        win_rate = wins / n_trials
-        avg_turns = total_turns / n_trials
-        avg_levels = total_levels / n_trials
-        avg_wall_collisions = total_wall_collisions / n_trials
-        avg_goals_activated = total_goals_activated / n_trials
+            cfg_summary: dict[str, Any] = {
+                "key": f"{effort}::{cfg_name}",
+                "reasoning_effort": effort,
+                "config_name": cfg_name,
+                "config": cfg,
+                "provider": provider,
+                "model": model,
+                "n_trials": n_trials,
+                "wins": wins,
+                "win_rate": wins / n_trials,
+                "avg_turns": total_turns / n_trials,
+                "avg_turns_on_win": (sum(won_turns) / len(won_turns)) if won_turns else None,
+                "avg_levels_completed": total_levels / n_trials,
+                "avg_wall_collisions": total_wall_collisions / n_trials,
+                "avg_goals_activated": total_goals_activated / n_trials,
+                "total_input_tokens": total_in,
+                "total_output_tokens": total_out,
+                "total_reasoning_tokens": total_reason,
+                "total_cost_usd": round(total_cost, 4),
+                "run_files": run_files,
+            }
+            summary.append(cfg_summary)
 
-        cfg_summary: dict[str, Any] = {
-            "config_name": cfg_name,
-            "config": cfg,
-            "provider": provider,
-            "model": model,
-            "n_trials": n_trials,
-            "wins": wins,
-            "win_rate": win_rate,
-            "avg_turns": avg_turns,
-            "avg_levels_completed": avg_levels,
-            "avg_wall_collisions": avg_wall_collisions,
-            "avg_goals_activated": avg_goals_activated,
-            "run_files": run_files,
-        }
-        summary.append(cfg_summary)
-
-        print(f"\n  ✓ {cfg_name}: win_rate={win_rate:.0%}  "
-              f"avg_turns={avg_turns:.1f}  avg_levels={avg_levels:.1f}  "
-              f"wall_collisions={avg_wall_collisions:.1f}  goals_activated={avg_goals_activated:.1f}")
-
-    # ── Compute relative difficulty (only on winning runs) ────────────────────
-    baseline = next((s for s in summary if s["config_name"] == "baseline"), None)
-    baseline_turns = baseline["avg_turns"] if baseline else None
-    for s in summary:
-        if baseline_turns and baseline_turns > 0 and s["avg_turns"] > 0:
-            s["relative_difficulty"] = round(s["avg_turns"] / baseline_turns, 3)
-        else:
-            s["relative_difficulty"] = None
+            print(f"\n  ✓ {effort}::{cfg_name}: win_rate={cfg_summary['win_rate']:.0%}  "
+                  f"avg_turns={cfg_summary['avg_turns']:.1f}  "
+                  f"cost=${cfg_summary['total_cost_usd']:.4f}")
 
     # ── Save summary ──────────────────────────────────────────────────────────
-    summary_path = RESULTS_DIR / f"ablation_summary_{timestamp}.json"
-    summary_path.write_text(json.dumps(summary, indent=2))
+    summary_path = RESULTS_DIR / f"ablation_summary_{provider}_{model.replace('/', '_')}_{run_tag}.json"
+    summary_path.write_text(json.dumps({
+        "provider": provider, "model": model, "n_trials": n_trials,
+        "timestamp": timestamp, "env": "ls20_real_game", "env_id": "ls20",
+        "input_cost_per_m": input_cost_per_m, "output_cost_per_m": output_cost_per_m,
+        "results": summary,
+    }, indent=2))
     print(f"\nFull summary saved → {summary_path}")
 
-    # ── Print results table ───────────────────────────────────────────────────
-    print("\n" + "="*97)
-    print(f"{'Config':<20}  {'Win%':>5}  {'Avg turns':>9}  {'Avg levels':>10}  {'Wall hits':>9}  {'Goals act.':>10}  {'Rel. diff':>9}")
-    print("-"*97)
+    # ── Results table ─────────────────────────────────────────────────────────
+    print("\n" + "=" * 96)
+    print(f"{'cell':<28}{'N':>3}{'win%':>6}{'avgTurns':>9}{'reason_tok':>11}{'cost$':>9}")
+    print("-" * 96)
+    grand = 0.0
     for s in summary:
-        rel = f"{s['relative_difficulty']:.2f}x" if s["relative_difficulty"] is not None else "  n/a"
-        print(
-            f"{s['config_name']:<20}  "
-            f"{s['win_rate']:>5.0%}  "
-            f"{s['avg_turns']:>9.1f}  "
-            f"{s['avg_levels_completed']:>10.1f}  "
-            f"{s['avg_wall_collisions']:>9.1f}  "
-            f"{s['avg_goals_activated']:>10.1f}  "
-            f"{rel:>9}"
-        )
-    print("="*97)
+        grand += s["total_cost_usd"]
+        print(f"{s['key']:<28}{s['n_trials']:>3}{s['win_rate']*100:>5.0f}%"
+              f"{s['avg_turns']:>9.1f}{s['total_reasoning_tokens']:>11}{s['total_cost_usd']:>9.3f}")
+    print("-" * 96)
+    print(f"{'TOTAL COST':>87} ${grand:.3f}")
+    print("=" * 96)
 
 
 # ── CLI entry point ───────────────────────────────────────────────────────────
 
 def _parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Run ablation study for Environment 3.")
-    p.add_argument("--trials", type=int, default=5,
-                   help="Number of trials per config (default: 5).")
+    p = argparse.ArgumentParser(description="Run ablation study for Environment 3 (LS20).")
+    p.add_argument("--trials", type=int, default=20,
+                   help="Number of trials per cell (default: 20).")
     p.add_argument("--provider", default="openrouter",
-                   choices=["openrouter"],
+                   choices=["openrouter", "qwen-local"],
                    help="LLM provider (default: openrouter).")
-    p.add_argument("--model", default="meta-llama/llama-3.3-70b-instruct:free",
+    p.add_argument("--model", default="deepseek/deepseek-v4-pro",
                    help="OpenRouter model identifier.")
     p.add_argument("--configs", nargs="+", choices=list(ALL_CONFIGS.keys()),
-                   help="Subset of configs to run (default: all).")
+                   help=f"Subset of configs (default: {DEFAULT_CONFIGS}).")
+    p.add_argument("--reasoning-effort", nargs="+", default=["none", "medium"],
+                   choices=REASONING_EFFORTS, dest="reasoning_efforts",
+                   help="One or more reasoning efforts to sweep (default: none medium).")
+    p.add_argument("--input-cost-per-m", type=float, default=0.30, dest="input_cost_per_m",
+                   help="$/M input tokens (default: 0.30, deepseek-v4-pro).")
+    p.add_argument("--output-cost-per-m", type=float, default=0.90, dest="output_cost_per_m",
+                   help="$/M output+reasoning tokens (default: 0.90, deepseek-v4-pro).")
     p.add_argument("--quiet", action="store_true",
                    help="Suppress per-turn verbose output.")
     return p.parse_args()
@@ -188,5 +216,8 @@ if __name__ == "__main__":
         provider=args.provider,
         model=args.model,
         config_names=args.configs,
+        reasoning_efforts=args.reasoning_efforts,
+        input_cost_per_m=args.input_cost_per_m,
+        output_cost_per_m=args.output_cost_per_m,
         verbose=not args.quiet,
     )

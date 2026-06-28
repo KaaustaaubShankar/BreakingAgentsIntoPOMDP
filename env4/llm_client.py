@@ -9,9 +9,19 @@ import os
 import re
 from typing import Any, Dict
 
+from pathlib import Path
+
 from dotenv import load_dotenv
 
 load_dotenv()
+# arc_agi/base.py loads `.env.example` at import (override=False). When run from
+# env4/, that pulls the placeholder OPENROUTER_API_KEY from env4/.env.example,
+# which — depending on import order — can shadow the real key and cause silent
+# 401 "Missing Authentication header" on every turn (0-token trials that look
+# like normal losses). Force the real key from the repo-root .env.
+_ROOT_ENV = Path(__file__).resolve().parents[1] / ".env"
+if _ROOT_ENV.exists():
+    load_dotenv(_ROOT_ENV, override=True)
 
 
 class LLMClient:
@@ -101,8 +111,10 @@ class LLMClient:
         return openai.OpenAI(base_url=self.OPENROUTER_BASE_URL, api_key=api_key)
 
     def generate(self, system_prompt: str, user_prompt: str) -> str:
+        if self.provider == "qwen-local":
+            return self._generate_qwen_local(system_prompt, user_prompt)
         if self.provider != "openrouter":
-            raise ValueError(f"Unknown provider: {self.provider}. Use 'openrouter'.")
+            raise ValueError(f"Unknown provider: {self.provider}. Use 'openrouter' or 'qwen-local'.")
 
         kwargs = {
             "model": self.model,
@@ -121,6 +133,31 @@ class LLMClient:
         if content is None:
             raise ValueError("OpenRouter returned empty content.")
         return str(content)
+
+    def _generate_qwen_local(self, system_prompt: str, user_prompt: str) -> str:
+        """Local Qwen 3 inference. Delegates to top-level qwen_local module
+        so ka59_game / env3 / env4 share one model cache per process."""
+        import sys, pathlib
+        repo_root = str(pathlib.Path(__file__).resolve().parents[1])
+        if repo_root not in sys.path:
+            sys.path.insert(0, repo_root)
+        from qwen_local import generate as _qwen_generate
+        text, input_tokens, output_tokens = _qwen_generate(
+            self.model, system_prompt, user_prompt, self.reasoning_effort
+        )
+
+        class _U:
+            pass
+
+        _U.input_tokens = input_tokens
+        _U.output_tokens = output_tokens
+        _U.total_tokens = input_tokens + output_tokens
+
+        class _R:
+            usage = _U()
+
+        self._record_usage(_R())
+        return text
 
     def generate_with_image(
         self,
