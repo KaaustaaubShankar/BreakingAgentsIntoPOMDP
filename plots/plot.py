@@ -89,10 +89,10 @@ _data_pct = {
         "rows": ["GPT-5.2 (med)", "GPT-5.2 (none)", "Deepseek (med)", "Deepseek (none)"],
         "cols": ["BASELINE", "WORLD_HARD", "MECHANICS_HARD", "MECHANICS_HARD\n_NORULES", "FEEDBACK_HARD"],
         "pcts": [
-            [ 90,  0,   0, 0,  80],
-            [ 90,  0,   0,    0,  80],
-            [ 20,  0,   0,    0,  10],
-            [ 60,  0,  20,   20,  75],
+            [ 80,  0,   0,   0, 100],   # GPT-5.2 (med)  N=10  (fixed: medium row had none's numbers)
+            [ 90,  0,   0,   0,  80],   # GPT-5.2 (none) N=10
+            [ 20,  0,   0,   0,  10],   # Deepseek (med) N=20
+            [ 60,  0,  20,  20,  75],   # Deepseek (none) N=20
         ],
         "ns": [
             [10, 10, 10, 10, 10],

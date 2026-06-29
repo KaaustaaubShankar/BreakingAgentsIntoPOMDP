@@ -1,13 +1,20 @@
 # KA59-Simple results — reality, validity, and options
 
 This PR archives the actual KA59-Simple run data behind the paper figure and
-documents exactly what each cell is backed by. **The figure is left matching the
-paper** (no figure change here) — this is documentation so the team can keep it
-matched with full knowledge of the underlying data, or correct it, deliberately.
+applies one confirmed correction to the figure.
+
+## Fix applied in this PR
+**GPT-5.2 (medium) row was mis-entered with the *none* row's numbers.** The
+hand-entered figure (commit `1c36111`) showed GPT-5.2 medium = `90/0/0/0/80`,
+identical to none. The Google Sheet, the `513-medium` run, and the per-effort
+data all say medium = **`80/0/0/0/100`**. `plots/plot.py` + the regenerated
+`ka59_simple_heatmap.pdf` now show GPT-5.2 med = 80/0/0/0/100 (distinct from none
+90/0/0/0/80). The none row was already correct.
 
 ## The short version
 - **DeepSeek-V4-Pro was the only model run at a full clean N=20.** GPT-5.2 on
-  KA59-Simple is smaller (N=5 per reasoning setting; we couldn't afford more).
+  KA59-Simple is N=10 per reasoning setting (2 runs of N=5 each; effort inferred
+  from token/time since it predates per-trial effort logging).
 - The paper figure's KA59 numbers were **hand-entered** (commit `1c36111`,
   2026-06-20 "cleaning up plot") from the Google Sheet, not computed from the run
   files. `plots/plot.py` stores percentages and back-calculates counts
