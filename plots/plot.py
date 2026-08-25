@@ -54,17 +54,21 @@ def pct_to_k(pct, n):
 # Raw percentage inputs — converted to counts once, up front.
 _data_pct = {
     "BP35": {
-        "rows": ["GPT-5.2 (med)", "GPT-5.2 (none)", "Deepseek (med)", "Deepseek (none)"],
+        "rows": ["GPT-5.6-LUNA (med)", "GPT-5.6-LUNA (none)","GPT-5.2 (med)", "GPT-5.2 (none)", "Deepseek (med)", "Deepseek (none)"],
         "cols": ["BASELINE", "WORLD_HARD", "MECHANICS_HARD", "FEEDBACK_HARD"],
         "pcts": [
+            [100,25,95,100],
+            [100,0,0,100],
             [100,  0, 100, 100],
-            [100,  0,  66, 100],
+            [100,  0,  60, 100],
             [100, 10, 100, 100],
             [100,  0, 100, 100],
         ],
         "ns": [
-            [15, 15, 15, 15],
-            [15, 15, 15, 15],
+            [20, 20, 20, 20],
+            [20, 20, 20, 20],
+            [20, 20, 20, 20],
+            [20, 20, 20, 20],
             [20, 20, 20, 20],
             [20, 20, 20, 20],
         ],
