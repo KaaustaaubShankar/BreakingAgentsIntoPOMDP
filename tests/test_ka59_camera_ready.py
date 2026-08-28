@@ -56,6 +56,80 @@ class CameraReadyAuditTests(unittest.TestCase):
         kind, _ = audit._fatal_errors({"errors": ["Turn 1: unknown action 'SPIN'"]})
         self.assertIsNone(kind)
 
+    def test_deepseek_empty_content_is_infrastructure(self) -> None:
+        kind, _ = audit._fatal_errors({
+            "errors": ["Turn 1: LLM/parse error — DeepSeek returned empty content."]
+        })
+        self.assertEqual(kind, "infrastructure_error")
+
+    def test_dual_denominators_change_only_deepseek_none_mechanics(self) -> None:
+        cells = {
+            (cell["model"], cell["reasoning_effort"], cell["config"]): cell
+            for cell in self.manifest["paper_cells"]
+        }
+        changed = [
+            key for key, cell in cells.items()
+            if cell["denominator_policies_differ"]
+        ]
+        key = ("deepseek-v4-pro", "none", "mechanics_hard")
+        self.assertEqual(changed, [key])
+        cell = cells[key]
+        self.assertEqual(
+            (
+                cell["infrastructure_clean_scored_n"],
+                cell["infrastructure_clean_scored_wins"],
+                cell["infrastructure_clean_scored_losses"],
+            ),
+            (20, 4, 16),
+        )
+        self.assertEqual(
+            (
+                cell["strict_error_free_n"],
+                cell["strict_error_free_wins"],
+                cell["strict_error_free_losses"],
+            ),
+            (19, 4, 15),
+        )
+        self.assertEqual(cell["model_protocol_failures"], 1)
+        self.assertEqual(cell["denominator_decision"], "NEEDS HUMAN DECISION")
+
+    def test_every_prior_parse_error_has_evidence_based_review(self) -> None:
+        review = self.manifest["parse_error_review"]
+        self.assertEqual(review["prior_parse_error_trial_count"], 47)
+        self.assertEqual(
+            review["disposition_counts"],
+            {"infrastructure_failure": 46, "model_protocol_failure": 1},
+        )
+        model_failures = [
+            trial for trial in review["trials"]
+            if trial["classification"] == "model_protocol_failure"
+        ]
+        self.assertEqual(len(model_failures), 1)
+        failure = model_failures[0]
+        self.assertEqual(failure["parse_turns"], [100])
+        self.assertEqual(failure["raw_response_excerpts"], ['{"'])
+        self.assertEqual(failure["actions_after_last_parse"], 27)
+        self.assertTrue(failure["runner_recovered_after_parse"])
+        self.assertEqual(failure["final_outcome"], "loss")
+
+    def test_every_cell_exposes_requested_policy_counts(self) -> None:
+        required = {
+            "nominal_historical_n",
+            "infrastructure_clean_scored_n",
+            "strict_error_free_n",
+            "infrastructure_exclusions",
+            "model_protocol_failures",
+            "harness_exclusions",
+            "indeterminate_parse_exclusions",
+            "duplicates_excluded",
+            "infrastructure_clean_scored_wins",
+            "infrastructure_clean_scored_losses",
+            "strict_error_free_wins",
+            "strict_error_free_losses",
+        }
+        for cell in self.manifest["paper_cells"]:
+            self.assertTrue(required.issubset(cell))
+
     def test_generated_files_are_current(self) -> None:
         self.assertEqual(
             audit.MANIFEST_PATH.read_text(),
