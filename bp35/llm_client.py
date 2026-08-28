@@ -95,14 +95,20 @@ class LLMClient:
     def _client(self):
         import openai
 
+        if self.provider == "openai":
+            api_key = os.environ.get("OPENAI_API_KEY")
+            if not api_key:
+                raise ValueError("OPENAI_API_KEY environment variable is required.")
+            return openai.OpenAI(api_key=api_key)
+
         api_key = os.environ.get("OPENROUTER_API_KEY")
         if not api_key:
             raise ValueError("OPENROUTER_API_KEY environment variable is required.")
         return openai.OpenAI(base_url=self.OPENROUTER_BASE_URL, api_key=api_key)
 
     def generate(self, system_prompt: str, user_prompt: str) -> str:
-        if self.provider != "openrouter":
-            raise ValueError(f"Unknown provider: {self.provider}. Use 'openrouter'.")
+        if self.provider not in ("openrouter", "openai"):
+            raise ValueError(f"Unknown provider: {self.provider}. Use 'openrouter' or 'openai'.")
 
         kwargs = {
             "model": self.model,
@@ -112,14 +118,14 @@ class LLMClient:
                 {"role": "user", "content": user_prompt},
             ],
         }
-        if self.reasoning_effort and self.reasoning_effort != "none":
+        if self.provider == "openrouter" and self.reasoning_effort and self.reasoning_effort != "none":
             kwargs["extra_body"] = {"reasoning": {"enabled": True}}
 
         response = self._client().chat.completions.create(**kwargs)
         self._record_usage(response)
         content = response.choices[0].message.content
         if content is None:
-            raise ValueError("OpenRouter returned empty content.")
+            raise ValueError(f"{self.provider} returned empty content.")
         return str(content)
 
     def generate_with_image(
@@ -128,8 +134,8 @@ class LLMClient:
         user_prompt: str,
         base64_png: str,
     ) -> str:
-        if self.provider != "openrouter":
-            raise ValueError(f"Unknown provider: {self.provider}. Use 'openrouter'.")
+        if self.provider not in ("openrouter", "openai"):
+            raise ValueError(f"Unknown provider: {self.provider}. Use 'openrouter' or 'openai'.")
 
         kwargs = {
             "model": self.model,
@@ -148,16 +154,15 @@ class LLMClient:
                 },
             ],
         }
-        if self.reasoning_effort and self.reasoning_effort != "none":
+        if self.provider == "openrouter" and self.reasoning_effort and self.reasoning_effort != "none":
             kwargs["extra_body"] = {"reasoning": {"enabled": True, "effort": self.reasoning_effort}}
 
         response = self._client().chat.completions.create(**kwargs)
 
-
         self._record_usage(response)
         content = response.choices[0].message.content
         if content is None:
-            raise ValueError("OpenRouter returned empty content.")
+            raise ValueError(f"{self.provider} returned empty content.")
         return str(content)
 
     def parse_json(self, text: str) -> Dict[str, Any]:
