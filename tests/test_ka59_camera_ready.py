@@ -130,6 +130,18 @@ class CameraReadyAuditTests(unittest.TestCase):
         for cell in self.manifest["paper_cells"]:
             self.assertTrue(required.issubset(cell))
 
+    def test_accepted_gpt_figure_lineage_is_explicit(self) -> None:
+        none_base = self.cells[("openai/gpt-5.2", "none", "baseline")]
+        medium_base = self.cells[("openai/gpt-5.2", "medium", "baseline")]
+        medium_feedback = self.cells[("openai/gpt-5.2", "medium", "feedback_hard")]
+        self.assertEqual(none_base["nominal_historical_n"], 5)
+        self.assertIn("pooled none+medium", none_base["historical_display_value"])
+        self.assertEqual(medium_base["nominal_historical_n"], 5)
+        self.assertIn("8/10 (80%)", medium_base["historical_display_value"])
+        self.assertIn("raw 4/5", medium_base["historical_display_value"])
+        self.assertIn("10/10 (100%)", medium_feedback["historical_display_value"])
+        self.assertIn("raw 5/5", medium_feedback["historical_display_value"])
+
     def test_generated_files_are_current(self) -> None:
         self.assertEqual(
             audit.MANIFEST_PATH.read_text(),

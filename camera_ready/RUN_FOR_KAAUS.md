@@ -1,12 +1,15 @@
-# Run KA59-Simple for Camera-Ready
+# KA59-Simple Camera-Ready Execution Appendix
+
+Do not start paid runs from this file alone. Read `camera_ready/README.md` and
+record the author decisions on reporting unit, target N, no-rules protocol, and
+model/provider identity first.
 
 ## What changed
 
-Historical summaries counted provider/parse failures as losses, duplicated a
-pooled GPT N=10 row under both efforts, and described a no-rules prompt branch
-that did not yet exist. The manifest now separates valid wins/losses, errors,
-duplicates, and incompatible protocols. Read `KA59_CAMERA_READY_TRUTH.md` before
-spending compute.
+Historical summaries counted provider/parse failures as losses, displayed GPT
+N=5 evidence through N=10 rows, and described a no-rules prompt branch that did
+not yet exist. The manifest now separates valid wins/losses, errors, duplicates,
+and incompatible protocols.
 
 ## Setup and zero-call checks
 
@@ -19,7 +22,7 @@ python3 -m venv .venv
 
 `--smoke` initializes KA59-Simple locally and makes zero model calls.
 
-## Current GPT-5.2 strict valid N and N=20 deficit
+## Provisional GPT-5.2 strict valid N and N=20-per-effort deficit
 
 | Effort | baseline | world | mechanics | no-rules tag | feedback |
 |---|---:|---:|---:|---:|---:|
@@ -30,6 +33,9 @@ python3 -m venv .venv
 
 These strict denominators exclude any trial with a provider/API/parse/environment
 failure. They intentionally differ from the historical N=5/N=10 summary table.
+N=20 here is an operational scenario, not a settled scientific requirement.
+The reviewer/PI request to increase N still requires authors to choose whether
+the target is per effort or pooled and which cells are primary.
 
 ## Plan GPT-5.2 (zero calls)
 
@@ -69,7 +75,14 @@ excluded; three repeated infrastructure failures stop the run explicitly.
 
 The no-rules tag exactly reproduces accepted raw behavior, which fell through
 to the ordinary mechanics-hard prompt. Do not run or interpret it as the later
-paper-intended format-only control without an author decision.
+paper-intended format-only control without an author decision. If authors choose
+the intended control, it needs a distinct protocol identity and runner change;
+historical fallthrough trials cannot be pooled into it.
+
+The runner currently plans against `strict_error_free` aliases. If the authors
+choose `infrastructure_clean_scored` as the primary denominator, update and
+review the planning policy before paid execution rather than assuming the
+candidate 4/20 DeepSeek mechanics cell is already counted by this runner.
 
 ## Validate returned results
 

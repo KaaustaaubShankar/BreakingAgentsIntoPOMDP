@@ -1,5 +1,8 @@
 # KA59-Simple Accepted-Data Protocol Lock
 
+For project state and pending author decisions, start with
+`camera_ready/README.md`. This file is the technical protocol appendix.
+
 This lock describes the protocol that produced the accepted-paper raw data. It
 separates direct raw observations from metadata recovered through Git history.
 Where the evidence conflicts or is incomplete, the field is marked **AMBIGUOUS**.
