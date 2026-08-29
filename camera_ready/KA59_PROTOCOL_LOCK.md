@@ -7,6 +7,10 @@ This lock describes the protocol that produced the accepted-paper raw data. It
 separates direct raw observations from metadata recovered through Git history.
 Where the evidence conflicts or is incomplete, the field is marked **AMBIGUOUS**.
 
+The exhaustive GPT universe is recorded in
+`camera_ready/ka59_gpt_complete_trial_universe.json`. PR #20's restored files
+are duplicate evidence copies for a selected subset, not the universe boundary.
+
 ## Environment
 
 - Environment ID observed in raw files: `ka59simple`.
@@ -101,8 +105,10 @@ action list and CLICK protocol. That branch was added later. Therefore:
 - Model slug observed: `openai/gpt-5.2`.
 - Provider observed: `openrouter`.
 - Reasoning efforts: `none` and `medium`.
-- Main-cell effort metadata in restored per-trial files is historically
-  recovered (`_effort_recovered: true`), not directly logged.
+- Main-cell effort is observed in the May 13 aggregate and recovered for each
+  raw trial from the runner's effort-major execution order. PR #20's restored
+  filenames interleaved world/mechanics efforts and are superseded by this
+  aggregate-backed mapping.
 - No-rules effort is recovered from distinct run dates.
 - OpenRouter upstream/provider pin: **AMBIGUOUS**. It was not logged and the
   historical client did not pin an upstream provider.

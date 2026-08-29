@@ -16,6 +16,7 @@ and incompatible protocols.
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
+.venv/bin/python -m scripts.audit_ka59_gpt_complete_universe --check
 .venv/bin/python -m scripts.audit_ka59_camera_ready --check
 .venv/bin/python -m scripts.run_ka59_camera_ready --smoke
 ```
@@ -26,16 +27,20 @@ python3 -m venv .venv
 
 | Effort | baseline | world | mechanics | no-rules tag | feedback |
 |---|---:|---:|---:|---:|---:|
-| none valid N | 5 | 2 | 2 | 0 | 5 |
-| none remaining | 15 | 18 | 18 | 20 | 15 |
-| medium valid N | 0 | 3 | 3 | 0 | 0 |
-| medium remaining | 20 | 17 | 17 | 20 | 20 |
+| none valid N | 5 | 5 | 5 | 19 | 5 |
+| none remaining | 15 | 15 | 15 | 1 | 15 |
+| medium valid N | 0 | 0 | 0 | 0 | 0 |
+| medium remaining | 20 | 20 | 20 | 20 | 20 |
 
 These strict denominators exclude any trial with a provider/API/parse/environment
 failure. They intentionally differ from the historical N=5/N=10 summary table.
 N=20 here is an operational scenario, not a settled scientific requirement.
 The reviewer/PI request to increase N still requires authors to choose whether
 the target is per effort or pooled and which cells are primary.
+
+No new compute is needed to finish historical reconciliation. These deficits
+matter only if authors choose N=20 as the camera-ready target; they are not a
+recommendation to run.
 
 ## Plan GPT-5.2 (zero calls)
 

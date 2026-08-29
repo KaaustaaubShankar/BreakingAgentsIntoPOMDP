@@ -4,9 +4,10 @@ Start with `camera_ready/README.md`. This file is the manuscript-edit checklist,
 not the project overview.
 
 Authority reviewed: the accepted 16-page paper PDF, merged PR #18/#20 raw
-artifacts, Git history, and the generated camera-ready manifest. The manuscript
-source is not committed to `anon-submission`, so this PR identifies required
-edits but does not silently choose scientific wording for the authors.
+artifacts, the complete GPT historical-universe audit, Git history, and the
+generated camera-ready manifest. The manuscript source is not committed to
+`anon-submission`, so this PR identifies required edits but does not silently
+choose scientific wording for the authors.
 
 ## Required corrections
 
@@ -28,16 +29,22 @@ edits but does not silently choose scientific wording for the authors.
   under the candidate denominator, and feedback-hard 15/20.
 - DeepSeek `none` mechanics-hard is 4/19 in the strict sensitivity view. This
   is the only numeric difference between the two denominator policies.
-- GPT-5.2 `none`: baseline 5/5 and feedback-hard 3/5; world-hard and
-  mechanics-hard are 0/2 after infrastructure exclusions.
-- GPT-5.2 `medium`: world-hard and mechanics-hard are 0/3 after infrastructure
-  exclusions. Baseline and feedback have no clean accepted denominator.
+- GPT-5.2 `none`: baseline 5/5, world-hard 0/5, mechanics-hard 0/5,
+  feedback-hard 3/5, and historical no-rules fallthrough 0/19.
+- GPT-5.2 `medium`: no clean denominator in any main or no-rules cell. The
+  complete candidate cells are N=5 for each main condition and N=10 for
+  no-rules; every trial contains provider-empty failures.
 - The high-level world/mechanics disruption pattern is directionally supported
   in these slices. It must not be presented as a uniformly powered full matrix.
 
 The historical no-rules-tagged DeepSeek `none` outcome is 4/20, but it is only
 supportable as another run of the ordinary mechanics-hard prompt. It is not
 evidence for the paper-described control.
+
+The GPT no-rules-none 0/19 pool has the same interpretation boundary. Its five
+included batches are independently 0/5, 0/4, 0/1, 0/4, and 0/5; this is a
+replicated result for the historical fallthrough prompt, not validation of the
+paper-described format-only control.
 
 ## Decisions the manuscript cannot make automatically
 
@@ -53,9 +60,11 @@ evidence for the paper-described control.
 
 ## Parse review boundary
 
-Of 47 trials previously labelled `parse_error`, 46 explicitly record DeepSeek
+Of 49 parse-bearing records now in scope, 46 explicitly record DeepSeek
 empty content and are infrastructure failures. One DeepSeek `none`
 mechanics-hard trial contains the nonempty malformed fragment `'{"'` at turn 100,
 then completes 27 later action events and ends in a normal loss. The candidate
 denominator treats that as recoverable model behavior; the strict view excludes
-it. No reviewed trial supports a harness parse failure or indeterminate label.
+it. Two newly recovered GPT no-rules-none trials persist a `NoneType` parse
+exception without the raw response, so they are indeterminate and excluded.
+No reviewed trial proves a harness parse failure.

@@ -5,7 +5,7 @@ Start with `camera_ready/README.md` for the owner-facing state and decision mode
 
 ## Authority and denominator policies
 
-The authoritative evidence is the per-trial raw JSON restored by merged PR #20 for GPT-5.2 and the raw files named by merged PR #18 summaries for DeepSeek-V4-Pro. Transport/provider, environment, and harness failures are never model losses. Model-produced invalid actions and genuine protocol failures remain model behavior when the request succeeded.
+GPT-5.2 authority is the complete historical universe in `camera_ready/ka59_gpt_complete_trial_universe.json`; PR #20's restored directory is an accepted-evidence subset and duplicate copy layer, not the universe boundary. DeepSeek-V4-Pro authority remains the raw files named by merged PR #18 summaries. Transport/provider, environment, and harness failures are never model losses. Model-produced invalid actions and genuine protocol failures remain model behavior when the request succeeded.
 
 Two views are intentionally preserved. `infrastructure_clean_scored` is the candidate paper denominator: it excludes infrastructure/environment/harness/indeterminate failures and exact duplicates, but scores completed trials containing genuine model protocol failures by final outcome. `strict_error_free` is the ultra-conservative sensitivity view and additionally excludes every parse-error-bearing trial. The runner's legacy `valid_n` target remains the strict view in this commit.
 
@@ -16,13 +16,13 @@ Raw trials do not log an environment Git SHA. The KA59-Simple environment path `
 | Model | Effort | Config | Nominal N | Infra-clean N | Infra-clean W/L | Strict N | Strict W/L | Infra excl. | Model protocol | Harness excl. | Indeterminate | Duplicates | Decision |
 |---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
 | openai/gpt-5.2 | none | baseline | 5 | 5 | 5/0 | 5 | 5/0 | 0 | 0 | 0 | 0 | 0 | SAME SUBSTANTIVE CONCLUSION |
-| openai/gpt-5.2 | none | world_hard | 5 | 2 | 0/2 | 2 | 0/2 | 3 | 0 | 0 | 0 | 0 | SAME SUBSTANTIVE CONCLUSION |
-| openai/gpt-5.2 | none | mechanics_hard | 5 | 2 | 0/2 | 2 | 0/2 | 3 | 0 | 0 | 0 | 0 | SAME SUBSTANTIVE CONCLUSION |
-| openai/gpt-5.2 | none | mechanics_hard_format_only | 10 | 0 | 0/0 | 0 | 0/0 | 1 | 0 | 0 | 0 | 9 | SAME SUBSTANTIVE CONCLUSION |
+| openai/gpt-5.2 | none | world_hard | 5 | 5 | 0/5 | 5 | 0/5 | 0 | 0 | 0 | 0 | 0 | SAME SUBSTANTIVE CONCLUSION |
+| openai/gpt-5.2 | none | mechanics_hard | 5 | 5 | 0/5 | 5 | 0/5 | 0 | 0 | 0 | 0 | 0 | SAME SUBSTANTIVE CONCLUSION |
+| openai/gpt-5.2 | none | mechanics_hard_format_only | 31 | 19 | 0/19 | 19 | 0/19 | 10 | 0 | 0 | 2 | 0 | SAME SUBSTANTIVE CONCLUSION |
 | openai/gpt-5.2 | none | feedback_hard | 5 | 5 | 3/2 | 5 | 3/2 | 0 | 0 | 0 | 0 | 0 | SAME SUBSTANTIVE CONCLUSION |
 | openai/gpt-5.2 | medium | baseline | 5 | 0 | 0/0 | 0 | 0/0 | 5 | 0 | 0 | 0 | 0 | SAME SUBSTANTIVE CONCLUSION |
-| openai/gpt-5.2 | medium | world_hard | 5 | 3 | 0/3 | 3 | 0/3 | 2 | 0 | 0 | 0 | 0 | SAME SUBSTANTIVE CONCLUSION |
-| openai/gpt-5.2 | medium | mechanics_hard | 5 | 3 | 0/3 | 3 | 0/3 | 2 | 0 | 0 | 0 | 0 | SAME SUBSTANTIVE CONCLUSION |
+| openai/gpt-5.2 | medium | world_hard | 5 | 0 | 0/0 | 0 | 0/0 | 5 | 0 | 0 | 0 | 0 | SAME SUBSTANTIVE CONCLUSION |
+| openai/gpt-5.2 | medium | mechanics_hard | 5 | 0 | 0/0 | 0 | 0/0 | 5 | 0 | 0 | 0 | 0 | SAME SUBSTANTIVE CONCLUSION |
 | openai/gpt-5.2 | medium | mechanics_hard_format_only | 10 | 0 | 0/0 | 0 | 0/0 | 10 | 0 | 0 | 0 | 0 | SAME SUBSTANTIVE CONCLUSION |
 | openai/gpt-5.2 | medium | feedback_hard | 5 | 0 | 0/0 | 0 | 0/0 | 5 | 0 | 0 | 0 | 0 | SAME SUBSTANTIVE CONCLUSION |
 | deepseek-v4-pro | none | baseline | 20 | 20 | 12/8 | 20 | 12/8 | 0 | 0 | 0 | 0 | 0 | SAME SUBSTANTIVE CONCLUSION |
@@ -40,18 +40,19 @@ Only DeepSeek none / mechanics-hard differs: the candidate view is 4 wins, 16 lo
 
 ## Parse-error review
 
-All 47 trials previously classified `parse_error` were inspected. Forty-six DeepSeek-medium records explicitly say `DeepSeek returned empty content`; these are provider/infrastructure failures, even where the historical runner later produced actions or a win. The remaining record, `ka59_game/results/deepseek-v4-pro/run_fE_gE_mH_wE_20260613T050257_120144.json`, persisted the nonempty fragment `'{"'` as the failed response at turn 100. It is invalid under the documented JSON-object protocol, so it is a `model_protocol_failure`, not a harness failure. The runner then completed 27 meaningful action events through turn 128 and recorded a normal loss. No raw evidence supports a `harness_parse_failure` or `indeterminate` classification.
+All 49 parse-bearing records now in scope were inspected. Forty-six DeepSeek-medium records explicitly say `DeepSeek returned empty content`; these are provider/infrastructure failures, even where the historical runner later produced actions or a win. The remaining record, `ka59_game/results/deepseek-v4-pro/run_fE_gE_mH_wE_20260613T050257_120144.json`, persisted the nonempty fragment `'{"'` as the failed response at turn 100. It is invalid under the documented JSON-object protocol, so it is a `model_protocol_failure`, not a harness failure. The runner then completed 27 meaningful action events through turn 128 and recorded a normal loss. Two newly recovered GPT no-rules-none trials persist only a `NoneType` parse exception without raw response content; they are `indeterminate` and excluded rather than guessed to be model or harness behavior. No raw evidence supports a definite `harness_parse_failure` classification.
 
 ## Why GPT N=5 and the accepted figure's N=10 rows diverged
 
-The 2026-05-13 GPT-5.2 ablation ran five trials at `none` and five at `medium` for each main condition. An early paper-facing figure pooled those efforts into baseline 9/10 and feedback-hard 8/10, then displayed that row under both effort labels. The accepted figure later changed the medium percentages to the raw medium rates but kept N=10, displaying 8/10 from 4/5 and 10/10 from 5/5. The none row retained the pooled 9/10 and 8/10 values. The accepted figure therefore mixes two reporting operations; neither row is an independent effort-specific N=10 sample. No second five-trial batch exists, so the raw effort-specific values remain N=5 each.
+The 2026-05-13 GPT-5.2 ablation ran five trials at `none` and five at `medium` for each main condition. Complete-history recovery found no additional compatible main-condition batch. An early paper-facing figure pooled those efforts into baseline 9/10 and feedback-hard 8/10, then displayed that row under both effort labels. The accepted figure later changed the medium percentages to the raw medium rates but kept N=10, displaying 8/10 from 4/5 and 10/10 from 5/5. The none row retained the pooled 9/10 and 8/10 values. The accepted figure therefore mixes two reporting operations; neither row is an independent effort-specific N=10 sample. The effort-specific candidate count remains N=5, but infrastructure-clean evidence is N=5 for every `none` main cell and N=0 for every `medium` main cell.
 
 ## Newly verified discrepancies
 
 1. The DeepSeek medium PR #18 summary labels N=20 cells but includes trials whose every turn failed with HTTP 402 `Insufficient Balance`. Those records are infrastructure failures, not model losses; the table above reports the remaining valid denominator.
-2. GPT-5.2 no-rules `none` includes credit-failure records. They are excluded rather than reported as 0% losses.
-3. Before commit `412ba5f`, `HARD_FORMAT_ONLY` fell through to the ordinary `MECHANICS_HARD` prompt. Thus the accepted raw no-rules runs did not actually retain the detailed action protocol described in the paper. Reproducing raw behavior and implementing the paper-intended control are different protocols and must not be pooled.
+2. PR #20 omitted 21 additional compatible GPT-5.2 no-rules `none` trials. Nineteen are clean losses; two have indeterminate parse provenance. Together with ten credit failures, the complete candidate universe is N=31 and the final eligible pool is 0/19.
+3. PR #20 interleaved May 13 effort labels for world/mechanics. Aggregate order restores `none` to five clean trials per cell and `medium` to five provider-failed trials per cell.
+4. Before commit `412ba5f`, `HARD_FORMAT_ONLY` fell through to the ordinary `MECHANICS_HARD` prompt. Thus the accepted raw no-rules runs did not actually retain the detailed action protocol described in the paper. Reproducing raw behavior and implementing the paper-intended control are different protocols and must not be pooled.
 
 ## Provenance
 
-Each manifest cell contains the exact valid and excluded raw filenames, batch/summary source, reasoning-effort metadata mode, source SHA-256, and semantic duplicate fingerprint. See `camera_ready/ka59_camera_ready_manifest.json` for the complete candidate-level record.
+Each manifest cell contains the exact valid and excluded raw filenames, batch/summary source, reasoning-effort metadata mode, source SHA-256, and semantic duplicate fingerprint. See `camera_ready/ka59_camera_ready_manifest.json` for the final eligible-protocol record and `camera_ready/ka59_gpt_complete_trial_universe.json` for every historical GPT candidate and duplicate.

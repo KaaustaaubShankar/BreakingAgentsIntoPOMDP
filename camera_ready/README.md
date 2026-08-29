@@ -8,6 +8,9 @@ accepted KA59-Simple reporting, however, is not camera-ready as written.
 - The accepted Figure 3 does not have independent GPT-5.2 N=10 samples for
   `none` and `medium`. The source run is N=5 per effort, and the final figure
   mixes a pooled row with rates scaled from N=5 to an N=10 display.
+- PR #20 restored a selected GPT per-trial subset, not the complete historical
+  universe. Exhaustive recovery adds 21 compatible no-rules-none trials and
+  corrects the May 13 effort mapping for world/mechanics.
 - Provider and account failures were historically allowed to consume turns and
   then enter summaries as losses. Those records measure degraded infrastructure,
   not clean model behavior.
@@ -42,9 +45,13 @@ single recoverable model-protocol failure is scored in the main denominator.
 5. The `HARD_FORMAT_ONLY` prompt branch was implemented only after the accepted
    no-rules runs. The tag in the raw files and the control described in the paper
    refer to different protocols.
-6. PR #20 restored the missing GPT per-trial files. This PR then reconstructed
-   candidate-level provenance, separated infrastructure from model behavior,
-   and froze a resume-safe protocol for any new runs.
+6. PR #20 restored selected GPT per-trial files, but it was not an exhaustive
+   universe definition. Its reconstructed filenames also interleaved `none`
+   and `medium` for May 13 world/mechanics despite the aggregate's effort-major
+   execution order.
+7. The complete-history audit accounts for 219 logical trials plus 60 restored
+   duplicate artifacts. It finds five additional compatible June 1 no-rules
+   batches: 19 clean losses and two provenance-insufficient parse records.
 
 ## What the audit changes conceptually
 
@@ -53,7 +60,8 @@ The audit separates three layers that historical reporting blurred:
 | Layer | Question | Rule |
 |---|---|---|
 | Historical display | What appeared in the paper/Sheet? | Preserve it as provenance, not evidence. |
-| Audited evidence | What do committed raw trials support? | Exclude infrastructure, harness, indeterminate, incomplete, and duplicate records; keep genuine model behavior. |
+| Complete historical universe | What GPT trials or aggregates can be recovered anywhere in reachable history/local preservation? | Inventory every candidate outcome-blind; do not treat PR #20 selection as the universe. |
+| Final eligible evidence | Which candidates match the locked protocol and survive failure/provenance exclusions? | Pool every independent compatible trial; exclude infrastructure, indeterminate, incompatible, smoke, and duplicate records. |
 | Camera-ready experiment | What should be run and reported now? | Use one frozen protocol identity and count only valid completed trials toward the chosen target N. |
 
 Infrastructure failures include authentication, insufficient balance, timeout,
@@ -74,10 +82,10 @@ The strict view differs in only one place, noted below.
 | DeepSeek `none` mechanics-hard | 4/20 | Supported; strict sensitivity is 4/19 because one malformed model response is excluded. |
 | DeepSeek `none` historical no-rules tag | 4/20 | Outcome is reproducible, but only as another run of the ordinary mechanics-hard prompt, not the paper-described control. |
 | DeepSeek `none` feedback-hard | 15/20 | Supported evidence that feedback removal is comparatively survivable for this slice. |
-| GPT-5.2 `none` | baseline 5/5; world 0/2; mechanics 0/2; feedback 3/5 | Directional, small-N evidence. |
-| GPT-5.2 `medium` | world 0/3; mechanics 0/3 | Directional, small-N evidence only; baseline and feedback have no clean denominator. |
+| GPT-5.2 `none` main cells | baseline 5/5; world 0/5; mechanics 0/5; feedback 3/5 | Complete-history, effort-corrected small-N evidence. |
+| GPT-5.2 `none` historical no-rules tag | 0/19 across five batches | Supported only as the historical mechanics-hard fallthrough, not the paper-described control. |
+| GPT-5.2 `medium` | no clean cell | All five candidates in each main cell and all ten no-rules candidates contain provider-empty failures. |
 | DeepSeek `medium` | no clean cell | Supports an infrastructure-failure diagnosis, not the published model rates. |
-| GPT-5.2 no-rules | no clean cell | Does not support a camera-ready performance claim. |
 
 The existing data support the narrower conclusion that world information is
 important and that mechanics removal is highly disruptive in the audited slices.
@@ -139,6 +147,10 @@ model-by-effort statements.
 ## Drill-down map
 
 - `PAPER_RECONCILIATION.md`: claim-by-claim manuscript correction checklist.
+- `KA59_GPT_COMPLETE_TRIAL_UNIVERSE.md`: exhaustive GPT batch inventory,
+  eligibility decisions, and final pooled cells.
+- `ka59_gpt_complete_trial_universe.json`: trial-level source paths, protocol
+  metadata, category, failures, outcomes, and duplicate relationships.
 - `KA59_CAMERA_READY_TRUTH.md`: generated cell table and parse review.
 - `ka59_camera_ready_manifest.json`: candidate-level files, hashes,
   classifications, and denominator membership.

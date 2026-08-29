@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest import mock
 
 from scripts import audit_ka59_camera_ready as audit
+from scripts import audit_ka59_gpt_complete_universe as gpt_universe
 from scripts import run_ka59_camera_ready as runner
 
 
@@ -95,10 +96,14 @@ class CameraReadyAuditTests(unittest.TestCase):
 
     def test_every_prior_parse_error_has_evidence_based_review(self) -> None:
         review = self.manifest["parse_error_review"]
-        self.assertEqual(review["prior_parse_error_trial_count"], 47)
+        self.assertEqual(review["prior_parse_error_trial_count"], 49)
         self.assertEqual(
             review["disposition_counts"],
-            {"infrastructure_failure": 46, "model_protocol_failure": 1},
+            {
+                "indeterminate": 2,
+                "infrastructure_failure": 46,
+                "model_protocol_failure": 1,
+            },
         )
         model_failures = [
             trial for trial in review["trials"]
@@ -111,6 +116,37 @@ class CameraReadyAuditTests(unittest.TestCase):
         self.assertEqual(failure["actions_after_last_parse"], 27)
         self.assertTrue(failure["runner_recovered_after_parse"])
         self.assertEqual(failure["final_outcome"], "loss")
+
+    def test_complete_gpt_universe_corrects_effort_mapping_and_pools_all_batches(self) -> None:
+        universe = gpt_universe.build_universe()
+        cells = {
+            (cell["reasoning_effort"], cell["config"]): cell
+            for cell in universe["final_cells"]
+        }
+        self.assertEqual(universe["logical_trial_count"], 219)
+        self.assertEqual(cells[("none", "world_hard")]["final_pooled_estimate"], "0/5 (0%)")
+        self.assertEqual(cells[("none", "mechanics_hard")]["final_pooled_estimate"], "0/5 (0%)")
+        self.assertEqual(cells[("none", "mechanics_hard_format_only")]["final_pooled_estimate"], "0/19 (0%)")
+        self.assertEqual(cells[("medium", "world_hard")]["infrastructure_clean_included_n"], 0)
+        self.assertEqual(cells[("medium", "mechanics_hard")]["infrastructure_clean_included_n"], 0)
+
+    def test_may13_n1_is_outcome_blind_smoke_exclusion(self) -> None:
+        universe = gpt_universe.build_universe()
+        trial = next(
+            trial for trial in universe["trials"]
+            if trial["batch"] == "20260513T043402_656079"
+        )
+        self.assertEqual(trial["eligibility"], "EXCLUDED_EXPLICIT_SMOKE_OR_DEBUG")
+        self.assertEqual(trial["turn_budget_per_attempt"], 8)
+        self.assertTrue(trial["outcome_read_after_eligibility"])
+
+    def test_complete_universe_generated_files_are_current(self) -> None:
+        universe = gpt_universe.build_universe()
+        self.assertEqual(
+            gpt_universe.OUTPUT_JSON.read_text(),
+            json.dumps(universe, indent=2, sort_keys=True) + "\n",
+        )
+        self.assertEqual(gpt_universe.OUTPUT_MD.read_text(), gpt_universe.render_markdown(universe))
 
     def test_every_cell_exposes_requested_policy_counts(self) -> None:
         required = {
