@@ -569,3 +569,19 @@ class CameraReadyAblationSummaryTests(unittest.TestCase):
                    if r["config_name"] == "mechanics_hard" and r["reasoning_effort"] == "none")
         self.assertEqual(row["n_trials"], 40)
         self.assertEqual(len(row["pooled_from_format_only_fallthrough"]), 20)
+
+
+class RecoveredRawTrialTests(unittest.TestCase):
+    """Trials rebuilt from surviving git blobs must match the recorded digest."""
+
+    def test_every_recovered_file_matches_its_recorded_digest(self):
+        from scripts import recover_gpt_raw_trials as recovery
+        report = recovery.recover(write=False)
+        self.assertEqual(report["digest_mismatch"], [])
+        self.assertEqual(report["unreadable_blob"], [])
+
+    def test_no_scored_gpt_trial_is_unresolvable(self):
+        from scripts import build_camera_ready_ablation_summaries as summaries
+        for row in summaries.build_summary("openai/gpt-5.2"):
+            self.assertEqual(row["run_files_unresolvable_on_disk"], 0, row["config_name"])
+            self.assertEqual(row["metrics_from_n_files"], row["n_trials"], row["config_name"])

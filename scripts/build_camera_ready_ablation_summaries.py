@@ -49,6 +49,9 @@ def _restored_copies() -> dict[str, str]:
     }
 
 
+RECOVERED_DIR = REPO_ROOT / "ka59_game" / "results" / "gpt-5.2-recovered"
+
+
 def _resolve(relative: str, restored: dict[str, str]) -> str | None:
     """An openable repo-relative path for a cited trial, or None if it is gone."""
     if (REPO_ROOT / relative).exists():
@@ -56,6 +59,10 @@ def _resolve(relative: str, restored: dict[str, str]) -> str | None:
     candidate = restored.get(relative)
     if candidate and (REPO_ROOT / candidate).exists():
         return candidate
+    # trials rebuilt from surviving git blobs by scripts/recover_gpt_raw_trials.py
+    recovered = RECOVERED_DIR / Path(relative).name
+    if recovered.exists():
+        return str(recovered.relative_to(REPO_ROOT))
     return None
 
 
