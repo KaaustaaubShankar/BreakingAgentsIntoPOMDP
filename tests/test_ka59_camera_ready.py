@@ -514,34 +514,58 @@ class QuotaVsRateLimitTests(unittest.TestCase):
 
 
 class CameraReadyAblationSummaryTests(unittest.TestCase):
-    """Summaries must be arithmetically consistent with the files they cite."""
+    """Summaries follow the bp35 schema and stay honest about their files."""
 
     def _rows(self, model):
         from scripts import build_camera_ready_ablation_summaries as summaries
         return summaries.build_summary(model)
 
-    def test_file_lists_match_the_reported_counts(self):
+    def test_rows_carry_the_bp35_field_set(self):
+        required = ("config_name", "config", "provider", "model", "reasoning_effort",
+                    "n_trials", "wins", "win_rate", "avg_turns",
+                    "avg_levels_completed", "avg_invalid_actions", "run_files")
+        for row in self._rows("deepseek-v4-pro"):
+            for field in required:
+                self.assertIn(field, row, row["config_name"])
+
+    def test_every_listed_run_file_exists_on_disk(self):
+        from scripts.audit_ka59_camera_ready import REPO_ROOT
         for model in ("openai/gpt-5.2", "deepseek-v4-pro"):
             for row in self._rows(model):
-                accepted, new = row["accepted_trials"], row["camera_ready_trials"]
-                self.assertEqual(len(accepted["run_files"]), accepted["n"], row["config_name"])
+                for relative in row["run_files"]:
+                    self.assertTrue((REPO_ROOT / relative).exists(), relative)
+
+    def test_wins_never_exceed_the_denominator(self):
+        for model in ("openai/gpt-5.2", "deepseek-v4-pro"):
+            for row in self._rows(model):
+                self.assertLessEqual(row["wins"], row["n_trials"], row["config_name"])
+                if row["n_trials"]:
+                    self.assertAlmostEqual(
+                        row["win_rate"], row["wins"] / row["n_trials"], places=3
+                    )
+
+    def test_partial_file_coverage_is_declared_not_hidden(self):
+        """A cell citing more trials than it can show must say so."""
+        for model in ("openai/gpt-5.2", "deepseek-v4-pro"):
+            for row in self._rows(model):
                 self.assertEqual(
-                    len(new["win_files"]) + len(new["loss_files"]), new["n"], row["config_name"]
+                    row["metrics_from_n_files"], len(row["run_files"]), row["config_name"]
                 )
-                self.assertEqual(accepted["n"] + new["n"], row["valid_n"])
-                self.assertEqual(accepted["wins"] + new["wins"], row["wins"])
-                self.assertEqual(row["wins"] + row["losses"], row["valid_n"])
+                self.assertEqual(
+                    len(row["run_files_as_cited_by_manifest"]) - len(row["run_files"]),
+                    row["run_files_unresolvable_on_disk"],
+                )
 
     def test_ported_control_cites_no_historical_files(self):
         for model in ("openai/gpt-5.2", "deepseek-v4-pro"):
             row = next(r for r in self._rows(model)
                        if r["config_name"] == "mechanics_hard_format_only"
                        and r["reasoning_effort"] == "none")
-            self.assertEqual(row["accepted_trials"]["run_files"], [])
-            self.assertEqual(row["camera_ready_trials"]["n"], 20)
+            self.assertEqual(row["accepted_run_files"], [])
+            self.assertEqual(row["n_trials"], 20)
 
     def test_pooled_mechanics_cell_cites_the_fallthrough_files(self):
         row = next(r for r in self._rows("deepseek-v4-pro")
                    if r["config_name"] == "mechanics_hard" and r["reasoning_effort"] == "none")
-        self.assertEqual(row["valid_n"], 40)
-        self.assertEqual(len(row["accepted_trials"]["pooled_from_format_only_fallthrough"]), 20)
+        self.assertEqual(row["n_trials"], 40)
+        self.assertEqual(len(row["pooled_from_format_only_fallthrough"]), 20)

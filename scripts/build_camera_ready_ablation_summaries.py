@@ -17,6 +17,7 @@ from typing import Any
 
 from scripts.audit_ka59_camera_ready import (
     CONFIG_LEVELS,
+    GPT_UNIVERSE_PATH,
     PAPER_CONFIGS,
     REPO_ROOT,
     build_manifest,
@@ -31,6 +32,31 @@ SLUG_TO_MODEL = {
     "deepseek/deepseek-v4-pro": "deepseek-v4-pro",
     "deepseek-v4-pro": "deepseek-v4-pro",
 }
+
+
+def _restored_copies() -> dict[str, str]:
+    """Historical trial path -> the restored copy that actually exists on disk.
+
+    The manifest cites GPT trials by the path they had when they were run. PR
+    #20 restored those trials under different names, so the cited paths are
+    provenance, not locations. This maps one to the other.
+    """
+    universe = json.loads(GPT_UNIVERSE_PATH.read_text())
+    return {
+        artifact["duplicate_of"]: artifact["source_path"]
+        for artifact in universe.get("duplicate_artifacts", [])
+        if artifact.get("duplicate_of") and artifact.get("source_path")
+    }
+
+
+def _resolve(relative: str, restored: dict[str, str]) -> str | None:
+    """An openable repo-relative path for a cited trial, or None if it is gone."""
+    if (REPO_ROOT / relative).exists():
+        return relative
+    candidate = restored.get(relative)
+    if candidate and (REPO_ROOT / candidate).exists():
+        return candidate
+    return None
 
 
 def _display(path: Path) -> str:
@@ -64,6 +90,28 @@ def _camera_ready_trials() -> dict[tuple[str, str, str], dict[str, Any]]:
     return grouped
 
 
+# bp35/results/ablation_summary_*.json field order, with KA59-Simple's metric
+# set (the bp35 gravity/undo counters do not exist in this environment).
+METRICS = (
+    "turns", "levels_completed", "invalid_actions",
+    "click_actions", "wall_transfers", "object_pushes", "max_goals_occupied",
+)
+
+
+def _metrics(paths: list[str]) -> dict[str, float]:
+    values: dict[str, list[float]] = {name: [] for name in METRICS}
+    for relative in paths:
+        payload = json.loads((REPO_ROOT / relative).read_text())
+        for name in METRICS:
+            value = payload.get(name)
+            if isinstance(value, (int, float)):
+                values[name].append(float(value))
+    return {
+        f"avg_{name}": round(sum(v) / len(v), 4) if v else None
+        for name, v in values.items()
+    }
+
+
 def build_summary(model: str) -> list[dict[str, Any]]:
     manifest = build_manifest(20)
     cells = {
@@ -75,64 +123,63 @@ def build_summary(model: str) -> list[dict[str, Any]]:
         for p in manifest["prompt_identity_pooling"]["pooled_cells"]
         if p["model"] == model
     }
-    new = _camera_ready_trials()
+    new_trials = _camera_ready_trials()
     rows: list[dict[str, Any]] = []
     for effort in ("none", "medium"):
         for config in PAPER_CONFIGS:
             cell = cells.get((effort, config))
             if cell is None:
                 continue
-            accepted_files = list(cell["infrastructure_clean_scored_raw_files"])
-            accepted_n = cell["infrastructure_clean_scored_n"]
+            accepted = list(cell["infrastructure_clean_scored_raw_files"])
             accepted_wins = cell["infrastructure_clean_scored_wins"]
             pooled_from: list[str] = []
             if config == "mechanics_hard" and effort in pooled:
-                group = pooled[effort]
                 partner = cells.get((effort, "mechanics_hard_format_only"))
                 if partner is not None:
-                    extra = list(partner["infrastructure_clean_scored_raw_files"])
-                    accepted_files += extra
-                    pooled_from = extra
-                    accepted_n = group["infrastructure_clean_scored_n"]
-                    accepted_wins = group["infrastructure_clean_scored_wins"]
+                    pooled_from = list(partner["infrastructure_clean_scored_raw_files"])
+                    accepted += pooled_from
+                    accepted_wins = pooled[effort]["infrastructure_clean_scored_wins"]
             if config == "mechanics_hard_format_only":
                 # the ported control shares no history with the fallthrough trials
-                accepted_files, accepted_n, accepted_wins, pooled_from = [], 0, 0, []
-            bucket = new.get((model, effort, config))
-            new_wins = bucket["wins"] if bucket else []
-            new_losses = bucket["losses"] if bucket else []
+                accepted, accepted_wins, pooled_from = [], 0, []
+            bucket = new_trials.get((model, effort, config))
+            fresh = (bucket["wins"] + bucket["losses"]) if bucket else []
+            fresh_wins = len(bucket["wins"]) if bucket else 0
             excluded = bucket["excluded"] if bucket else []
-            valid_n = accepted_n + len(new_wins) + len(new_losses)
-            wins = accepted_wins + len(new_wins)
+            run_files = accepted + fresh
+            wins = accepted_wins + fresh_wins
+            n = len(run_files)
+            restored = _restored_copies()
+            resolved = [r for r in (_resolve(f, restored) for f in run_files) if r]
+            missing = len(run_files) - len(resolved)
+            providers = sorted({
+                str(json.loads((REPO_ROOT / f).read_text()).get("provider"))
+                for f in resolved
+            }) if resolved else []
             rows.append({
-                "config": CONFIG_LEVELS[config],
                 "config_name": config,
+                "config": CONFIG_LEVELS[config],
+                "provider": providers[0] if len(providers) == 1 else "pooled",
                 "model": model,
                 "reasoning_effort": effort,
-                "valid_n": valid_n,
+                "n_trials": n,
                 "wins": wins,
-                "losses": valid_n - wins,
-                "win_rate": round(wins / valid_n, 4) if valid_n else None,
-                "win_rate_display": f"{wins}/{valid_n}" + (
-                    f" ({wins / valid_n:.0%})" if valid_n else " (no scored trials)"
-                ),
-                "target_n": 20,
-                "additional_trials_needed": max(0, 20 - valid_n),
+                "win_rate": round(wins / n, 4) if n else None,
+                **_metrics(resolved),
+                # avg_* are computed only from files that exist on disk. Where
+                # that is fewer than n_trials, the audited denominator still
+                # counts trials whose raw files were never restored.
+                "metrics_from_n_files": len(resolved),
+                "run_files": resolved,
+                # KA59-Simple audit fields with no bp35 equivalent
                 "denominator": "infrastructure_clean_scored",
-                "accepted_trials": {
-                    "n": accepted_n,
-                    "wins": accepted_wins,
-                    "run_files": accepted_files,
-                    "pooled_from_format_only_fallthrough": pooled_from,
-                },
-                "camera_ready_trials": {
-                    "n": len(new_wins) + len(new_losses),
-                    "wins": len(new_wins),
-                    "protocol_ids": sorted(x for x in (bucket["protocol_ids"] if bucket else set()) if x),
-                    "routing": sorted(x for x in (bucket["upstream"] if bucket else set()) if x),
-                    "win_files": new_wins,
-                    "loss_files": new_losses,
-                },
+                "target_n": 20,
+                "additional_trials_needed": max(0, 20 - n),
+                "run_files_unresolvable_on_disk": missing,
+                "run_files_as_cited_by_manifest": run_files,
+                "accepted_run_files": accepted,
+                "camera_ready_run_files": fresh,
+                "pooled_from_format_only_fallthrough": pooled_from,
                 "excluded_infrastructure_files": excluded,
             })
     return rows
@@ -147,9 +194,9 @@ def main() -> int:
         path.write_text(json.dumps(rows, indent=2, sort_keys=True) + "\n")
         print(f"Wrote {_display(path)}")
         for row in rows:
-            if row["valid_n"]:
+            if row["n_trials"]:
                 print(f"    {row['reasoning_effort']:7s} {row['config_name']:28s} "
-                      f"{row['win_rate_display']}")
+                      f"{row['wins']}/{row['n_trials']} ({row['win_rate']:.0%})")
     return 0
 
 
