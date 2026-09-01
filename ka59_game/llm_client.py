@@ -34,6 +34,7 @@ class LLMClient:
         model: str,
         reasoning_effort: str | None = None,
         upstream_provider: str | None = None,
+        upstream_sort: str | None = None,
     ) -> None:
         self.provider = provider.lower()
         self.model = model
@@ -44,6 +45,10 @@ class LLMClient:
         # among the listed upstreams; the served one is recorded per call in
         # last_upstream_provider so the identity stays auditable.
         self.upstream_provider = upstream_provider
+        # OpenRouter routing preference among the allowed upstreams, e.g.
+        # "throughput" to pick the fastest. Combined with an allow-list this
+        # keeps provenance bounded while still favouring speed.
+        self.upstream_sort = upstream_sort
         self.last_upstream_provider: str | None = None
         self.reset_usage()
 
@@ -264,10 +269,15 @@ class LLMClient:
         extra_body: Dict[str, Any] = {}
         if self.reasoning_effort:
             extra_body["reasoning"] = {"effort": self.reasoning_effort}
+        provider_pref: Dict[str, Any] = {}
         if self.upstream_provider:
-            extra_body["provider"] = {
-                "only": [p.strip() for p in self.upstream_provider.split(",") if p.strip()]
-            }
+            provider_pref["only"] = [
+                p.strip() for p in self.upstream_provider.split(",") if p.strip()
+            ]
+        if self.upstream_sort:
+            provider_pref["sort"] = self.upstream_sort
+        if provider_pref:
+            extra_body["provider"] = provider_pref
         if extra_body:
             kwargs["extra_body"] = extra_body
         for attempt in range(4):

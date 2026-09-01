@@ -431,3 +431,25 @@ class OpenRouterTransportTests(unittest.TestCase):
     def test_cap_clears_the_measured_per_turn_draw(self):
         from ka59_game.llm_client import OPENROUTER_MAX_TOKENS
         self.assertGreaterEqual(OPENROUTER_MAX_TOKENS, 4 * 10_000)
+
+
+class UpstreamRoutingTests(unittest.TestCase):
+    def test_sort_and_pin_are_both_sent(self):
+        from ka59_game.llm_client import LLMClient
+        client = LLMClient(provider="openrouter", model="m", reasoning_effort="medium",
+                           upstream_provider="A,B", upstream_sort="throughput")
+        api = mock.Mock()
+        msg = mock.Mock(content='{"action":"MOVE_UP"}')
+        api.chat.completions.create.return_value = mock.Mock(
+            choices=[mock.Mock(message=msg, finish_reason="stop")], usage=None, provider="A")
+        with mock.patch.object(type(client), "_openrouter_client", return_value=api):
+            client._generate_openrouter("s", "u")
+        sent = api.chat.completions.create.call_args.kwargs["extra_body"]["provider"]
+        self.assertEqual(sent, {"only": ["A", "B"], "sort": "throughput"})
+
+    def test_sort_changes_the_protocol_id(self):
+        a = runner.protocol_identity("openrouter", "deepseek/deepseek-v4-pro", "medium",
+                                     "baseline", "A,B")
+        b = runner.protocol_identity("openrouter", "deepseek/deepseek-v4-pro", "medium",
+                                     "baseline", "A,B", "throughput")
+        self.assertNotEqual(a["protocol_id"], b["protocol_id"])

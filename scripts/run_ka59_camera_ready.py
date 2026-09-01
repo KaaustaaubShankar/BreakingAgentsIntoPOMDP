@@ -74,6 +74,7 @@ def protocol_identity(
     effort: str,
     config: str,
     upstream_provider: str | None = None,
+    upstream_sort: str | None = None,
 ) -> dict[str, Any]:
     # The prompt itself is the identity, not a hardcoded claim about it. A cell
     # whose prompt bytes change gets a new protocol_id automatically.
@@ -82,6 +83,7 @@ def protocol_identity(
         **PROTOCOL_BASE,
         "provider": provider,
         "upstream_provider": upstream_provider,
+        "upstream_sort": upstream_sort,
         "model": model,
         "reasoning_effort": effort,
         "config": config,
@@ -179,11 +181,14 @@ def _runtime_counts(identity: dict[str, Any]) -> dict[str, Any]:
 def build_plan(
     *, provider: str, model: str, effort: str, configs: Iterable[str], target_n: int,
     upstream_provider: str | None = None,
+    upstream_sort: str | None = None,
 ) -> dict[str, Any]:
     manifest = build_manifest(target_n)
     cells: list[dict[str, Any]] = []
     for config in configs:
-        identity = protocol_identity(provider, model, effort, config, upstream_provider)
+        identity = protocol_identity(
+            provider, model, effort, config, upstream_provider, upstream_sort
+        )
         accepted_n, accepted_wins, accepted_losses = _accepted_count(manifest, identity)
         runtime = _runtime_counts(identity)
         if runtime["incompatible"]:
@@ -212,6 +217,7 @@ def build_plan(
         "external_calls": 0,
         "provider": provider,
         "upstream_provider": upstream_provider,
+        "upstream_sort": upstream_sort,
         "model": model,
         "reasoning_effort": effort,
         "target_n": target_n,
@@ -279,6 +285,7 @@ def _run(args: argparse.Namespace, plan: dict[str, Any]) -> int:
                 verbose=args.verbose,
                 reasoning_effort=args.reasoning_effort,
                 upstream_provider=args.upstream_provider,
+                upstream_sort=args.upstream_sort,
                 env_id="ka59simple",
                 save=False,
             )
@@ -393,6 +400,10 @@ def _parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
         "--upstream-provider",
         help="pin the OpenRouter upstream (e.g. DigitalOcean); recorded in protocol_id",
     )
+    parser.add_argument(
+        "--upstream-sort", choices=("throughput", "price", "latency"),
+        help="OpenRouter routing preference among the allowed upstreams",
+    )
     parser.add_argument("--target-n", type=int, default=20)
     parser.add_argument("--config", action="append", choices=PAPER_CONFIGS)
     parser.add_argument("--plan", action="store_true")
@@ -438,6 +449,7 @@ def main(argv: Iterable[str] | None = None) -> int:
         configs=configs,
         target_n=args.target_n,
         upstream_provider=args.upstream_provider,
+        upstream_sort=args.upstream_sort,
     )
     if args.plan:
         print(json.dumps(plan, indent=2, sort_keys=True))

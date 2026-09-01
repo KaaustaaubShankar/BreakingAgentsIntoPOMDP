@@ -932,7 +932,10 @@ def build_manifest(target_n: int = 20) -> dict[str, Any]:
                     "serving stack differs between the accepted and new trials",
                     "accepted trials ran under max_tokens=4096; the cap never bound at "
                     "effort none (mean 279 output tokens/turn, worst trial 1179)",
-                    "accepted upstream was unpinned; new trials pin one provider",
+                    "accepted upstream was unpinned; new medium trials are also "
+                    "unpinned, routed by OpenRouter sort=throughput, so the serving "
+                    "backend varies per call and is recorded per trial rather than "
+                    "fixed by the protocol",
                 ],
                 "disclosure_required_in_paper": True,
             },

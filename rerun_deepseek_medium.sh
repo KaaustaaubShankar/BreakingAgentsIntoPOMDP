@@ -18,7 +18,7 @@ cd "$(dirname "$0")"
 
 PY=venv/bin/python
 MODEL="deepseek/deepseek-v4-pro"
-UPSTREAM="DigitalOcean,StreamLake,GMICloud"
+SORT="throughput"   # no allow-list: route to the fastest provider available
 TARGET=20
 MAX_INFRA_ERRORS=5
 
@@ -36,7 +36,7 @@ cell () {  # $1 = config
   credit
   echo "=== medium / $1  (target N=$TARGET) ==="
   $PY -m scripts.run_ka59_camera_ready \
-    --provider openrouter --model "$MODEL" --upstream-provider "$UPSTREAM" \
+    --provider openrouter --model "$MODEL" --upstream-sort "$SORT" \
     --reasoning-effort medium --config "$1" \
     --target-n "$TARGET" --max-infrastructure-errors "$MAX_INFRA_ERRORS" --resume
   $PY -m scripts.run_ka59_camera_ready --index
@@ -45,7 +45,7 @@ cell () {  # $1 = config
 
 case "${1:-}" in
   plan)   $PY -m scripts.run_ka59_camera_ready --provider openrouter --model "$MODEL" \
-            --upstream-provider "$UPSTREAM" --reasoning-effort medium --target-n "$TARGET" --plan ;;
+            --upstream-sort "$SORT" --reasoning-effort medium --target-n "$TARGET" --plan ;;
   credit) credit ;;
   baseline|world_hard|mechanics_hard|mechanics_hard_format_only|feedback_hard) cell "$1" ;;
   all)    for c in baseline world_hard mechanics_hard mechanics_hard_format_only feedback_hard; do
