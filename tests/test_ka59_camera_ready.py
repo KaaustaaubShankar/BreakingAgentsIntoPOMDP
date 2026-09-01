@@ -453,3 +453,61 @@ class UpstreamRoutingTests(unittest.TestCase):
         b = runner.protocol_identity("openrouter", "deepseek/deepseek-v4-pro", "medium",
                                      "baseline", "A,B", "throughput")
         self.assertNotEqual(a["protocol_id"], b["protocol_id"])
+class GptCrossTransportPoolingTests(unittest.TestCase):
+    """GPT-5.2 accepted OpenRouter trials pool into direct-API runs."""
+
+    def test_direct_api_slug_resolves_to_the_accepted_model(self):
+        manifest = audit.build_manifest(20)
+        identity = runner.protocol_identity("openai", "gpt-5.2", "none", "baseline")
+        n, wins, _ = runner._accepted_count(manifest, identity)
+        self.assertEqual((n, wins), (5, 5))
+
+    def test_ported_control_still_inherits_nothing(self):
+        manifest = audit.build_manifest(20)
+        identity = runner.protocol_identity(
+            "openai", "gpt-5.2", "none", "mechanics_hard_format_only"
+        )
+        self.assertEqual(runner._accepted_count(manifest, identity), (0, 0, 0))
+
+    def test_pooled_mechanics_cell_needs_no_new_trials(self):
+        plan = runner.build_plan(provider="openai", model="gpt-5.2", effort="none",
+                                 configs=["mechanics_hard"], target_n=20)
+        self.assertEqual(plan["cells"][0]["current_valid_n"], 24)
+        self.assertEqual(plan["cells"][0]["deficit"], 0)
+
+    def test_cross_transport_decision_is_recorded_with_its_risk(self):
+        manifest = audit.build_manifest(20)
+        entry = manifest["cross_transport_pooling"]["openai/gpt-5.2"]
+        self.assertTrue(entry["disclosure_required_in_paper"])
+        self.assertIn("weaker_than_deepseek_pooling", entry)
+
+
+class QuotaVsRateLimitTests(unittest.TestCase):
+    """A quota 429 is terminal; a rate-limit 429 is worth retrying."""
+
+    def _client(self):
+        from ka59_game.llm_client import LLMClient
+        return LLMClient(provider="openrouter", model="m", reasoning_effort="none")
+
+    def _fail(self, message):
+        api = mock.Mock()
+        api.chat.completions.create.side_effect = Exception(message)
+        return api
+
+    def test_quota_exhaustion_is_not_retried(self):
+        client, api = self._client(), self._fail(
+            "Error code: 429 - {'code': 'credit_balance_exhausted', "
+            "'message': 'You have no credits remaining.'}")
+        with mock.patch.object(type(client), "_openrouter_client", return_value=api), \
+             mock.patch("time.sleep"):
+            with self.assertRaises(Exception):
+                client._generate_openrouter("s", "u")
+        self.assertEqual(api.chat.completions.create.call_count, 1)
+
+    def test_rate_limit_429_is_still_retried(self):
+        client, api = self._client(), self._fail("Error code: 429 - rate limit exceeded")
+        with mock.patch.object(type(client), "_openrouter_client", return_value=api), \
+             mock.patch("time.sleep"):
+            with self.assertRaises(Exception):
+                client._generate_openrouter("s", "u")
+        self.assertEqual(api.chat.completions.create.call_count, 4)

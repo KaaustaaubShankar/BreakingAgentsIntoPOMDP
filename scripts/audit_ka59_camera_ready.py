@@ -940,7 +940,29 @@ def build_manifest(target_n: int = 20) -> dict[str, Any]:
                 "disclosure_required_in_paper": True,
             },
             "openai/gpt-5.2": {
-                "decision": "not pooled across transports",
+                "decision": "author-approved: pool accepted OpenRouter trials with "
+                            "new trials run against the direct OpenAI API",
+                "accepted_transport": "openrouter, upstream unpinned",
+                "new_transport": "api.openai.com direct, model slug gpt-5.2",
+                "model_slug_alias": "gpt-5.2 -> openai/gpt-5.2",
+                "known_differences": [
+                    "accepted trials ran under max_tokens=1024; new trials use "
+                    "max_completion_tokens=16384",
+                    "accepted trials logged no token counts, so it cannot be shown "
+                    "that the 1024 cap never bound; 6 of 30 restored effort-none "
+                    "trials failed with empty content, which is consistent with "
+                    "occasional truncation",
+                    "accepted effort labels are recovered from the runner's "
+                    "effort-major execution order, not logged per trial",
+                    "accepted upstream was unpinned OpenRouter routing",
+                ],
+                "weaker_than_deepseek_pooling": (
+                    "for DeepSeek none the cap was shown non-binding (279 output "
+                    "tokens/turn, 3.5x headroom). No equivalent evidence exists for "
+                    "GPT-5.2, so this pooling rests on an assumption rather than a "
+                    "measurement."
+                ),
+                "disclosure_required_in_paper": True,
             },
         },
         "prompt_identity_pooling": {

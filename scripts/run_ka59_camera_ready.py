@@ -63,8 +63,11 @@ PROTOCOL_BASE = {
 # not (see _accepted_count).
 MODEL_ALIASES = {
     "deepseek/deepseek-v4-pro": "deepseek-v4-pro",
+    # Direct OpenAI API slug for the model the accepted trials reached through
+    # OpenRouter as "openai/gpt-5.2".
+    "gpt-5.2": "openai/gpt-5.2",
 }
-CROSS_TRANSPORT_POOLED_MODELS = {"deepseek-v4-pro"}
+CROSS_TRANSPORT_POOLED_MODELS = {"deepseek-v4-pro", "openai/gpt-5.2"}
 RUNTIME_ROOT = REPO_ROOT / "camera_ready" / "results"
 
 
