@@ -469,11 +469,15 @@ class GptCrossTransportPoolingTests(unittest.TestCase):
         )
         self.assertEqual(runner._accepted_count(manifest, identity), (0, 0, 0))
 
-    def test_pooled_mechanics_cell_needs_no_new_trials(self):
+    def test_planner_and_summary_agree_about_the_pooling_switch(self):
+        """The planner previously kept pooling after the summary had stopped."""
+        from scripts import build_camera_ready_ablation_summaries as summaries
         plan = runner.build_plan(provider="openai", model="gpt-5.2", effort="none",
                                  configs=["mechanics_hard"], target_n=20)
-        self.assertEqual(plan["cells"][0]["current_valid_n"], 24)
-        self.assertEqual(plan["cells"][0]["deficit"], 0)
+        row = next(r for r in summaries.build_summary("openai/gpt-5.2")
+                   if r["config_name"] == "mechanics_hard" and r["reasoning_effort"] == "none")
+        self.assertEqual(plan["cells"][0]["current_valid_n"], row["n_trials"])
+        self.assertEqual(plan["cells"][0]["deficit"], row["additional_trials_needed"])
 
     def test_cross_transport_decision_is_recorded_with_its_risk(self):
         manifest = audit.build_manifest(20)
@@ -564,11 +568,19 @@ class CameraReadyAblationSummaryTests(unittest.TestCase):
             self.assertEqual(row["accepted_run_files"], [])
             self.assertEqual(row["n_trials"], 20)
 
-    def test_pooled_mechanics_cell_cites_the_fallthrough_files(self):
+    def test_fallthrough_files_are_recorded_whether_pooled_or_not(self):
+        """Unpooling must set the trials aside visibly, never discard them."""
+        from scripts.audit_ka59_camera_ready import POOL_FALLTHROUGH_INTO_MECHANICS_HARD
         row = next(r for r in self._rows("deepseek-v4-pro")
                    if r["config_name"] == "mechanics_hard" and r["reasoning_effort"] == "none")
-        self.assertEqual(row["n_trials"], 40)
-        self.assertEqual(len(row["pooled_from_format_only_fallthrough"]), 20)
+        if POOL_FALLTHROUGH_INTO_MECHANICS_HARD:
+            self.assertEqual(row["n_trials"], 40)
+            self.assertEqual(len(row["pooled_from_format_only_fallthrough"]), 20)
+            self.assertEqual(row["fallthrough_files_available_but_not_pooled"], [])
+        else:
+            self.assertEqual(row["n_trials"], 20)
+            self.assertEqual(row["pooled_from_format_only_fallthrough"], [])
+            self.assertEqual(len(row["fallthrough_files_available_but_not_pooled"]), 20)
 
 
 class RecoveredRawTrialTests(unittest.TestCase):
@@ -621,3 +633,36 @@ class CleanResultsTreeTests(unittest.TestCase):
                         hashlib.sha256(copy.read_bytes()).hexdigest(),
                         source.name,
                     )
+
+
+class OpenAiTransportTests(unittest.TestCase):
+    def _client(self):
+        from ka59_game.llm_client import LLMClient
+        return LLMClient(provider="openai", model="gpt-5.2", reasoning_effort="medium")
+
+    def _api(self, *side_effect):
+        api = mock.Mock()
+        api.chat.completions.create.side_effect = list(side_effect)
+        return api
+
+    def _ok(self):
+        return mock.Mock(choices=[mock.Mock(message=mock.Mock(content='{"a":1}'))])
+
+    def test_timeout_is_retried_and_recovers(self):
+        client = self._client()
+        api = self._api(Exception("Request timed out."), self._ok())
+        with mock.patch("openai.OpenAI", return_value=api), \
+             mock.patch.dict("os.environ", {"OPENAI_API_KEY": "k"}), \
+             mock.patch("time.sleep"):
+            self.assertEqual(client._generate_openai("s", "u"), '{"a":1}')
+        self.assertEqual(api.chat.completions.create.call_count, 2)
+
+    def test_quota_exhaustion_still_fails_fast(self):
+        client = self._client()
+        api = self._api(*[Exception("429 credit_balance_exhausted")] * 4)
+        with mock.patch("openai.OpenAI", return_value=api), \
+             mock.patch.dict("os.environ", {"OPENAI_API_KEY": "k"}), \
+             mock.patch("time.sleep"):
+            with self.assertRaises(Exception):
+                client._generate_openai("s", "u")
+        self.assertEqual(api.chat.completions.create.call_count, 1)

@@ -17,6 +17,7 @@ from typing import Any
 
 from scripts.audit_ka59_camera_ready import (
     CONFIG_LEVELS,
+    POOL_FALLTHROUGH_INTO_MECHANICS_HARD,
     GPT_UNIVERSE_PATH,
     PAPER_CONFIGS,
     REPO_ROOT,
@@ -140,12 +141,17 @@ def build_summary(model: str) -> list[dict[str, Any]]:
             accepted = list(cell["infrastructure_clean_scored_raw_files"])
             accepted_wins = cell["infrastructure_clean_scored_wins"]
             pooled_from: list[str] = []
+            not_pooled: list[str] = []
             if config == "mechanics_hard" and effort in pooled:
                 partner = cells.get((effort, "mechanics_hard_format_only"))
                 if partner is not None:
-                    pooled_from = list(partner["infrastructure_clean_scored_raw_files"])
-                    accepted += pooled_from
-                    accepted_wins = pooled[effort]["infrastructure_clean_scored_wins"]
+                    fallthrough = list(partner["infrastructure_clean_scored_raw_files"])
+                    if POOL_FALLTHROUGH_INTO_MECHANICS_HARD:
+                        pooled_from = fallthrough
+                        accepted += fallthrough
+                        accepted_wins = pooled[effort]["infrastructure_clean_scored_wins"]
+                    else:
+                        not_pooled = fallthrough
             if config == "mechanics_hard_format_only":
                 # the ported control shares no history with the fallthrough trials
                 accepted, accepted_wins, pooled_from = [], 0, []
@@ -187,6 +193,7 @@ def build_summary(model: str) -> list[dict[str, Any]]:
                 "accepted_run_files": accepted,
                 "camera_ready_run_files": fresh,
                 "pooled_from_format_only_fallthrough": pooled_from,
+                "fallthrough_files_available_but_not_pooled": not_pooled,
                 "excluded_infrastructure_files": excluded,
             })
     return rows

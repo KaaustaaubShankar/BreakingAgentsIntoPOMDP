@@ -18,6 +18,7 @@ from ka59_game.llm_client import OPENROUTER_MAX_TOKENS
 
 from scripts.audit_ka59_camera_ready import (
     PAPER_CONFIGS,
+    POOL_FALLTHROUGH_INTO_MECHANICS_HARD,
     REPO_ROOT,
     _fatal_errors,
     _load_json,
@@ -109,7 +110,10 @@ def _accepted_count(manifest: dict[str, Any], identity: dict[str, Any]) -> tuple
     # Prefer a recorded pooled cell: configs proven to have delivered the same
     # treatment share one denominator, so the planner must not re-run a
     # condition that is already satisfied under its pooled count.
-    for pooled in manifest.get("prompt_identity_pooling", {}).get("pooled_cells", []):
+    for pooled in (
+        manifest.get("prompt_identity_pooling", {}).get("pooled_cells", [])
+        if POOL_FALLTHROUGH_INTO_MECHANICS_HARD else []
+    ):
         if (
             pooled["model"] == accepted_model
             and pooled["reasoning_effort"] == identity["reasoning_effort"]

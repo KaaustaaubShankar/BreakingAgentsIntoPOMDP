@@ -191,11 +191,33 @@ class LLMClient:
         )
         if self.reasoning_effort:
             kwargs["reasoning_effort"] = self.reasoning_effort
-        resp = client.chat.completions.create(**kwargs)
-        content = resp.choices[0].message.content
-        if content is None:
-            raise ValueError("OpenAI returned empty content.")
-        return str(content)
+        # Medium-effort turns can run long; a timeout or an empty body is
+        # transport flakiness, not a model answer, so retry rather than let one
+        # bad turn void a trial with most of its turns left.
+        import time
+        for attempt in range(4):
+            try:
+                resp = client.chat.completions.create(timeout=300.0, **kwargs)
+                content = resp.choices[0].message.content
+                if content is None:
+                    raise ValueError("OpenAI returned empty content.")
+                return str(content)
+            except Exception as exc:
+                msg = str(exc).lower()
+                quota_exhausted = (
+                    "insufficient_quota" in msg or "credit_balance_exhausted" in msg
+                    or "no credits remaining" in msg
+                )
+                retryable = not quota_exhausted and (
+                    "timed out" in msg or "timeout" in msg
+                    or "empty content" in msg
+                    or "429" in msg or "connection" in msg
+                )
+                if retryable and attempt < 3:
+                    time.sleep(5 * (attempt + 1))
+                    continue
+                raise
+        raise RuntimeError("OpenAI call exhausted retries without raising.")
 
     def _generate_claude_cli(self, system_prompt: str, user_prompt: str) -> str:
         """Route through `claude -p` CLI — uses Claude Code OAuth with token refresh.

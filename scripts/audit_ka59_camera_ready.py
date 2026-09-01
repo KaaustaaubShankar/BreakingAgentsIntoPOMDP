@@ -37,6 +37,13 @@ CONFIG_ALIASES = {
     "mechanics_no_rules": "mechanics_hard_format_only",
 }
 
+# The historical no-rules trials ran the mechanics-hard prompt, so pooling them
+# into mechanics_hard is sound evidence. Reporting them is a separate choice:
+# pooled is more precise, unpooled keeps every cell at a uniform N of its own
+# trials. Selection is on provenance, never outcome. Read by both the planner
+# and the summary builder so they cannot disagree.
+POOL_FALLTHROUGH_INTO_MECHANICS_HARD = False
+
 CONFIG_LEVELS: dict[str, dict[str, str]] = {
     "baseline": {
         "world": "EASY", "goal": "EASY", "mechanics": "EASY", "feedback": "EASY"
