@@ -37,6 +37,25 @@ CONFIG_ALIASES = {
     "mechanics_no_rules": "mechanics_hard_format_only",
 }
 
+CONFIG_LEVELS: dict[str, dict[str, str]] = {
+    "baseline": {
+        "world": "EASY", "goal": "EASY", "mechanics": "EASY", "feedback": "EASY"
+    },
+    "world_hard": {
+        "world": "HARD", "goal": "EASY", "mechanics": "EASY", "feedback": "EASY"
+    },
+    "mechanics_hard": {
+        "world": "EASY", "goal": "EASY", "mechanics": "HARD", "feedback": "EASY"
+    },
+    "mechanics_hard_format_only": {
+        "world": "EASY", "goal": "EASY", "mechanics": "HARD_FORMAT_ONLY",
+        "feedback": "EASY"
+    },
+    "feedback_hard": {
+        "world": "EASY", "goal": "EASY", "mechanics": "EASY", "feedback": "HARD"
+    },
+}
+
 LEGACY_INFRASTRUCTURE_MARKERS = (
     "error code: 401",
     "error code: 402",
@@ -732,10 +751,139 @@ def _summarise_cells(records: list[dict[str, Any]], target_n: int) -> list[dict[
     return cells
 
 
+FORMAT_ONLY_BRANCH_COMMIT = "412ba5f"
+
+
+def _historical_mechanics_level(mechanics: str) -> str:
+    """Resolve a declared mechanics level to what the accepted runs actually used.
+
+    `build_system_prompt` gained its `HARD_FORMAT_ONLY` branch in 412ba5f
+    (2026-06-25). Every accepted trial predates that commit, so trials tagged
+    HARD_FORMAT_ONLY fell through the elif chain and were served the ordinary
+    MECHANICS_HARD prompt. The audit describes historical evidence, so it must
+    fingerprint what those trials ran, not what the label resolves to in the
+    working tree today.
+    """
+    return "HARD" if mechanics == "HARD_FORMAT_ONLY" else mechanics
+
+
+def _system_prompt_fingerprint(config: str) -> dict[str, Any]:
+    """Fingerprint the treatment a config delivered in the accepted runs.
+
+    The system prompt is a function of (goal, mechanics) only; world and
+    feedback act on the per-turn observation. Two configs therefore delivered
+    the same treatment when their world/feedback levels match and their system
+    prompts were byte-identical at the accepted revision.
+    """
+    from ka59_game.prompts import build_system_prompt
+
+    levels = CONFIG_LEVELS[config]
+    declared = levels["mechanics"]
+    effective = _historical_mechanics_level(declared)
+    prompt = build_system_prompt(levels["goal"], effective)
+    current = build_system_prompt(levels["goal"], declared)
+    return {
+        "config": config,
+        "config_levels": dict(levels),
+        "world": levels["world"],
+        "feedback": levels["feedback"],
+        "declared_mechanics": declared,
+        "historical_effective_mechanics": effective,
+        "system_prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
+        "system_prompt_length": len(prompt),
+        "current_revision_sha256": hashlib.sha256(current.encode()).hexdigest(),
+        "current_revision_differs": prompt != current,
+    }
+
+
+def prompt_identity_groups() -> dict[str, Any]:
+    """Group paper configs that are byte-identical treatments in this revision."""
+    fingerprints = [_system_prompt_fingerprint(config) for config in PAPER_CONFIGS]
+    grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
+    for item in fingerprints:
+        grouped[(item["world"], item["feedback"], item["system_prompt_sha256"])].append(item)
+    collisions = [
+        {
+            "world": key[0],
+            "feedback": key[1],
+            "system_prompt_sha256": key[2],
+            "configs": [item["config"] for item in items],
+            "declared_mechanics_levels": [
+                item["config_levels"]["mechanics"] for item in items
+            ],
+        }
+        for key, items in grouped.items()
+        if len(items) > 1
+    ]
+    return {
+        "prompt_source": "ka59_game/prompts.py:build_system_prompt at the current revision",
+        "rule": (
+            "configs sharing world, feedback, and a byte-identical system prompt "
+            "deliver the same treatment and may be pooled; the label differs, the "
+            "experiment does not"
+        ),
+        "per_config_fingerprints": fingerprints,
+        "identical_treatment_groups": collisions,
+        "any_collision": bool(collisions),
+    }
+
+
+def _pooled_cells(
+    cells: list[dict[str, Any]], groups: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """Merge cells whose configs are the same treatment under different labels."""
+    pooled: list[dict[str, Any]] = []
+    for group in groups["identical_treatment_groups"]:
+        members = set(group["configs"])
+        by_slice: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+        for cell in cells:
+            if cell["config"] in members:
+                by_slice[(cell["model"], cell["reasoning_effort"])].append(cell)
+        for (model, effort), items in sorted(by_slice.items()):
+            if len(items) < 2:
+                continue
+            infra_n = sum(item["infrastructure_clean_scored_n"] for item in items)
+            infra_w = sum(item["infrastructure_clean_scored_wins"] for item in items)
+            strict_n = sum(item["strict_error_free_n"] for item in items)
+            strict_w = sum(item["strict_error_free_wins"] for item in items)
+            pooled.append({
+                "model": model,
+                "reasoning_effort": effort,
+                "pooled_configs": sorted(item["config"] for item in items),
+                "system_prompt_sha256": group["system_prompt_sha256"],
+                "component_cells": [
+                    {
+                        "config": item["config"],
+                        "infrastructure_clean_scored_value":
+                            item["infrastructure_clean_scored_value"],
+                        "strict_error_free_value": item["strict_error_free_value"],
+                    }
+                    for item in sorted(items, key=lambda c: c["config"])
+                ],
+                "infrastructure_clean_scored_n": infra_n,
+                "infrastructure_clean_scored_wins": infra_w,
+                "infrastructure_clean_scored_losses": infra_n - infra_w,
+                "infrastructure_clean_scored_value": (
+                    f"{infra_w}/{infra_n} ({infra_w / infra_n:.0%})"
+                    if infra_n else "NO SCORED TRIALS"
+                ),
+                "strict_error_free_n": strict_n,
+                "strict_error_free_wins": strict_w,
+                "strict_error_free_losses": strict_n - strict_w,
+                "strict_error_free_value": (
+                    f"{strict_w}/{strict_n} ({strict_w / strict_n:.0%})"
+                    if strict_n else "NO STRICT TRIALS"
+                ),
+            })
+    return pooled
+
+
 def build_manifest(target_n: int = 20) -> dict[str, Any]:
     records = _gpt_records() + _deepseek_records()
     _mark_duplicates(records)
     cells = _summarise_cells(records, target_n)
+    identity_groups = prompt_identity_groups()
+    pooled = _pooled_cells(cells, identity_groups)
     env_source = REPO_ROOT / "environment_files" / "ka59simple" / "20260430" / "ka59simple.py"
     prior_parse_records = [
         record for record in records if record["prior_audit_status"] == "parse_error"
@@ -773,6 +921,29 @@ def build_manifest(target_n: int = 20) -> dict[str, Any]:
             "post_run_understanding_error": "does not invalidate the already completed game outcome",
         },
         "paper_cells": cells,
+        "cross_transport_pooling": {
+            "deepseek-v4-pro": {
+                "decision": "author-approved: pool accepted direct-DeepSeek-API trials "
+                            "with new OpenRouter trials pinned to a single upstream",
+                "accepted_transport": "api.deepseek.com direct, provider field 'deepseek'",
+                "new_transport": "openrouter, upstream pinned via provider.order",
+                "model_slug_alias": "deepseek/deepseek-v4-pro -> deepseek-v4-pro",
+                "known_differences": [
+                    "serving stack differs between the accepted and new trials",
+                    "accepted trials ran under max_tokens=4096; the cap never bound at "
+                    "effort none (mean 279 output tokens/turn, worst trial 1179)",
+                    "accepted upstream was unpinned; new trials pin one provider",
+                ],
+                "disclosure_required_in_paper": True,
+            },
+            "openai/gpt-5.2": {
+                "decision": "not pooled across transports",
+            },
+        },
+        "prompt_identity_pooling": {
+            **identity_groups,
+            "pooled_cells": pooled,
+        },
         "parse_error_review": {
             "prior_parse_error_trial_count": len(prior_parse_records),
             "disposition_counts": dict(sorted(Counter(
@@ -814,6 +985,85 @@ def build_manifest(target_n: int = 20) -> dict[str, Any]:
                 "Historical prompt code before 412ba5f did not branch on HARD_FORMAT_ONLY, so accepted raw runs received MECHANICS_HARD. The paper-intended action-protocol-retaining prompt was added later.",
         },
     }
+
+
+def _render_pooling(manifest: dict[str, Any]) -> list[str]:
+    """Render the prompt-identity pooling evidence and pooled cells."""
+    pooling = manifest["prompt_identity_pooling"]
+    lines = [
+        "## Prompt-identity pooling",
+        "",
+        "Config labels are not evidence of distinct treatments. This section fingerprints "
+        "what each config actually sent in the accepted runs: the world and feedback levels "
+        "plus the SHA-256 of the system prompt built by "
+        "`ka59_game/prompts.py:build_system_prompt` at the accepted revision. Configs "
+        "agreeing on all three delivered an identical treatment and are pooled. "
+        f"`HARD_FORMAT_ONLY` gained a real prompt branch in {FORMAT_ONLY_BRANCH_COMMIT}; "
+        "every accepted trial predates it and fell through to `MECHANICS_HARD`.",
+        "",
+        "| Config | World | Mechanics (declared) | Mechanics (as run) | Feedback | Accepted prompt SHA-256 | Working tree today |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    for item in pooling["per_config_fingerprints"]:
+        today = (
+            f"`{item['current_revision_sha256'][:16]}` (differs)"
+            if item["current_revision_differs"] else "unchanged"
+        )
+        lines.append(
+            f"| {item['config']} | {item['world']} | "
+            f"{item['declared_mechanics']} | {item['historical_effective_mechanics']} | "
+            f"{item['feedback']} | `{item['system_prompt_sha256'][:16]}` | {today} |"
+        )
+    lines.append("")
+    if not pooling["any_collision"]:
+        lines += [
+            "No two configs share a treatment at this revision. Every paper cell is "
+            "reported on its own label.",
+            "",
+        ]
+        return lines
+    for group in pooling["identical_treatment_groups"]:
+        lines += [
+            f"**Identical treatment:** {', '.join(f'`{c}`' for c in group['configs'])} — "
+            f"declared mechanics levels "
+            f"{', '.join(f'`{m}`' for m in group['declared_mechanics_levels'])} "
+            f"resolved to the same prompt `{group['system_prompt_sha256'][:16]}` in "
+            "the accepted runs, which predate the real control branch. The labels "
+            "differ; the experiment did not.",
+            "",
+        ]
+    lines += [
+        "Pooled cells follow. These are the defensible denominators for the pooled "
+        "condition; the component per-label cells above remain as provenance.",
+        "",
+        "| Model | Effort | Pooled configs | Components (infra-clean) | Pooled infra-clean | Pooled strict |",
+        "|---|---|---|---|---|---|",
+    ]
+    for cell in manifest["prompt_identity_pooling"]["pooled_cells"]:
+        components = "; ".join(
+            f"{c['config'].replace('mechanics_hard', 'mech')}={c['infrastructure_clean_scored_value']}"
+            for c in cell["component_cells"]
+        )
+        lines.append(
+            f"| {cell['model']} | {cell['reasoning_effort']} | "
+            f"{', '.join(cell['pooled_configs'])} | {components} | "
+            f"**{cell['infrastructure_clean_scored_value']}** | "
+            f"{cell['strict_error_free_value']} |"
+        )
+    lines += [
+        "",
+        "A pooled cell already at or above the target N needs no further trials. The "
+        "runner cannot infer this: `protocol_identity` hashes the config *label*, so it "
+        "plans the component cells separately. Pooling is recorded here, not derived at "
+        "run time.",
+        "",
+        "Where the working tree column says *differs*, that config no longer reproduces "
+        "the accepted treatment. New trials under that label are a different protocol and "
+        "must not be added to the pooled cell above; they need their own identity and "
+        "their own denominator.",
+        "",
+    ]
+    return lines
 
 
 def render_truth(manifest: dict[str, Any]) -> str:
@@ -863,6 +1113,7 @@ def render_truth(manifest: dict[str, Any]) -> str:
         "**NEEDS HUMAN DECISION**. Every other cell is identical under the two policies, so the "
         "substantive conclusions for those cells do not change.",
         "",
+        *_render_pooling(manifest),
         "## Parse-error review",
         "",
         "All 49 parse-bearing records now in scope were inspected. Forty-six DeepSeek-medium "

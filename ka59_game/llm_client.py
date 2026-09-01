@@ -21,11 +21,22 @@ class LLMClient:
     OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
     def __init__(
-        self, provider: str, model: str, reasoning_effort: str | None = None
+        self,
+        provider: str,
+        model: str,
+        reasoning_effort: str | None = None,
+        upstream_provider: str | None = None,
     ) -> None:
         self.provider = provider.lower()
         self.model = model
         self.reasoning_effort = reasoning_effort
+        # OpenRouter routes across many upstreams by default. Pinning one keeps
+        # the served backend a recorded part of the experimental identity.
+        # Accepts one name or a comma-separated allow-list. OpenRouter picks
+        # among the listed upstreams; the served one is recorded per call in
+        # last_upstream_provider so the identity stays auditable.
+        self.upstream_provider = upstream_provider
+        self.last_upstream_provider: str | None = None
         self.reset_usage()
 
     def reset_usage(self) -> None:
@@ -153,14 +164,21 @@ class LLMClient:
         if not api_key:
             raise ValueError("OPENAI_API_KEY not set.")
         client = _openai.OpenAI(api_key=api_key)
-        resp = client.chat.completions.create(
+        # max_completion_tokens covers both reasoning and non-reasoning models;
+        # max_tokens is rejected by gpt-5.x and o-series reasoning models. The
+        # budget must clear the reasoning draw or the model spends it all on
+        # reasoning tokens and returns content=None.
+        kwargs: Dict[str, Any] = dict(
             model=self.model,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            max_tokens=1024,
+            max_completion_tokens=16384,
         )
+        if self.reasoning_effort:
+            kwargs["reasoning_effort"] = self.reasoning_effort
+        resp = client.chat.completions.create(**kwargs)
         content = resp.choices[0].message.content
         if content is None:
             raise ValueError("OpenAI returned empty content.")
@@ -233,16 +251,25 @@ class LLMClient:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            max_tokens=1024,
+            # Must clear the reasoning draw. At 1024 a reasoning model spends the
+            # whole budget thinking and returns content=None; that is what voided
+            # the 2026-06 medium sweeps.
+            max_tokens=16384,
         )
+        extra_body: Dict[str, Any] = {}
         if self.reasoning_effort:
-            kwargs["extra_body"] = {
-                "reasoning": {"effort": self.reasoning_effort}
+            extra_body["reasoning"] = {"effort": self.reasoning_effort}
+        if self.upstream_provider:
+            extra_body["provider"] = {
+                "only": [p.strip() for p in self.upstream_provider.split(",") if p.strip()]
             }
+        if extra_body:
+            kwargs["extra_body"] = extra_body
         for attempt in range(4):
             try:
                 response = self._openrouter_client().chat.completions.create(**kwargs)
                 self._record_usage(response)
+                self.last_upstream_provider = getattr(response, "provider", None)
                 content = response.choices[0].message.content
                 if content is None:
                     raise ValueError("OpenRouter returned empty content.")

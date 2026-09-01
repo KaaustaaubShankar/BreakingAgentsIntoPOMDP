@@ -19,6 +19,7 @@ from scripts.audit_ka59_camera_ready import (
     REPO_ROOT,
     _fatal_errors,
     _load_json,
+    _system_prompt_fingerprint,
     build_manifest,
 )
 
@@ -53,37 +54,80 @@ PROTOCOL_BASE = {
     "level_attempts": 2,
     "max_levels": 1,
     "failed_attempt_context_retained": True,
-    "format_only_behavior": "historical_fallthrough_to_MECHANICS_HARD",
-    "prompt_revision_recovered": "ff0c184",
 }
+
+# Accepted-data model slugs, keyed by the slug a transport requires. DeepSeek
+# trials are pooled across transports by explicit author decision; GPT-5.2 is
+# not (see _accepted_count).
+MODEL_ALIASES = {
+    "deepseek/deepseek-v4-pro": "deepseek-v4-pro",
+}
+CROSS_TRANSPORT_POOLED_MODELS = {"deepseek-v4-pro"}
 RUNTIME_ROOT = REPO_ROOT / "camera_ready" / "results"
 
 
-def protocol_identity(provider: str, model: str, effort: str, config: str) -> dict[str, Any]:
+def protocol_identity(
+    provider: str,
+    model: str,
+    effort: str,
+    config: str,
+    upstream_provider: str | None = None,
+) -> dict[str, Any]:
+    # The prompt itself is the identity, not a hardcoded claim about it. A cell
+    # whose prompt bytes change gets a new protocol_id automatically.
+    fingerprint = _system_prompt_fingerprint(config)
     identity = {
         **PROTOCOL_BASE,
         "provider": provider,
+        "upstream_provider": upstream_provider,
         "model": model,
         "reasoning_effort": effort,
         "config": config,
         "config_levels": ACCEPTED_CONFIGS[config],
+        "system_prompt_sha256": fingerprint["current_revision_sha256"],
+        "reproduces_accepted_prompt": not fingerprint["current_revision_differs"],
     }
     encoded = json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
     return {**identity, "protocol_id": hashlib.sha256(encoded).hexdigest()[:20]}
 
 
 def _accepted_count(manifest: dict[str, Any], identity: dict[str, Any]) -> tuple[int, int, int]:
+    # A cell whose prompt no longer reproduces the accepted one has no accepted
+    # evidence, whatever its label says. This is what keeps the ported
+    # format-only control from silently inheriting the historical fallthrough
+    # trials that ran the ordinary mechanics-hard prompt.
+    if not identity["reproduces_accepted_prompt"]:
+        return 0, 0, 0
+    accepted_model = MODEL_ALIASES.get(identity["model"], identity["model"])
+    # Prefer a recorded pooled cell: configs proven to have delivered the same
+    # treatment share one denominator, so the planner must not re-run a
+    # condition that is already satisfied under its pooled count.
+    for pooled in manifest.get("prompt_identity_pooling", {}).get("pooled_cells", []):
+        if (
+            pooled["model"] == accepted_model
+            and pooled["reasoning_effort"] == identity["reasoning_effort"]
+            and identity["config"] in pooled["pooled_configs"]
+        ):
+            return (
+                int(pooled["strict_error_free_n"]),
+                int(pooled["strict_error_free_wins"]),
+                int(pooled["strict_error_free_losses"]),
+            )
     for cell in manifest["paper_cells"]:
         if (
-            cell["model"] == identity["model"]
+            cell["model"] == accepted_model
             and cell["reasoning_effort"] == identity["reasoning_effort"]
             and cell["config"] == identity["config"]
         ):
-            # Accepted GPT artifacts used OpenRouter; DeepSeek used a mix that
-            # is not pooled into a differently requested provider identity.
-            accepted_provider = "openrouter" if identity["model"] == "openai/gpt-5.2" else None
-            if accepted_provider is not None and identity["provider"] != accepted_provider:
-                return 0, 0, 0
+            # GPT-5.2 accepted artifacts are OpenRouter-only and are not pooled
+            # into a different transport. DeepSeek is pooled across transports
+            # by explicit author decision, recorded in the manifest.
+            if accepted_model not in CROSS_TRANSPORT_POOLED_MODELS:
+                accepted_provider = (
+                    "openrouter" if accepted_model == "openai/gpt-5.2" else None
+                )
+                if accepted_provider is not None and identity["provider"] != accepted_provider:
+                    return 0, 0, 0
             return int(cell["valid_n"]), int(cell["wins"]), int(cell["losses"])
     return 0, 0, 0
 
@@ -131,12 +175,13 @@ def _runtime_counts(identity: dict[str, Any]) -> dict[str, Any]:
 
 
 def build_plan(
-    *, provider: str, model: str, effort: str, configs: Iterable[str], target_n: int
+    *, provider: str, model: str, effort: str, configs: Iterable[str], target_n: int,
+    upstream_provider: str | None = None,
 ) -> dict[str, Any]:
     manifest = build_manifest(target_n)
     cells: list[dict[str, Any]] = []
     for config in configs:
-        identity = protocol_identity(provider, model, effort, config)
+        identity = protocol_identity(provider, model, effort, config, upstream_provider)
         accepted_n, accepted_wins, accepted_losses = _accepted_count(manifest, identity)
         runtime = _runtime_counts(identity)
         if runtime["incompatible"]:
@@ -164,6 +209,7 @@ def build_plan(
     return {
         "external_calls": 0,
         "provider": provider,
+        "upstream_provider": upstream_provider,
         "model": model,
         "reasoning_effort": effort,
         "target_n": target_n,
@@ -196,7 +242,12 @@ def smoke_report() -> dict[str, Any]:
         "external_model_calls": 0,
         "required_environment_files_present": not missing,
         "missing_files": missing,
-        "historical_format_only_fallthrough_verified": format_only_prompt == mechanics_hard_prompt,
+        "format_only_prompt_regime": (
+            "historical_fallthrough_to_MECHANICS_HARD"
+            if format_only_prompt == mechanics_hard_prompt
+            else "paper_intended_action_protocol_retained"
+        ),
+        "format_only_is_a_distinct_control": format_only_prompt != mechanics_hard_prompt,
         "environment_initialised": environment_initialised,
         "runtime_error": runtime_error,
     }
@@ -225,6 +276,7 @@ def _run(args: argparse.Namespace, plan: dict[str, Any]) -> int:
                 turns_per_level=64,
                 verbose=args.verbose,
                 reasoning_effort=args.reasoning_effort,
+                upstream_provider=args.upstream_provider,
                 env_id="ka59simple",
                 save=False,
             )
@@ -263,14 +315,82 @@ def _run(args: argparse.Namespace, plan: dict[str, Any]) -> int:
     return 0
 
 
+def build_index() -> str:
+    """Human-readable index of the opaque protocol_id directories.
+
+    The runner resolves output directories by hash, so they cannot be renamed
+    without breaking resume. This maps each hash back to the cell it holds.
+    """
+    lines = [
+        "# Camera-ready run index",
+        "",
+        "Generated by `python -m scripts.run_ka59_camera_ready --index`. Makes no "
+        "model calls. Directories are named by `protocol_id`; the runner resolves "
+        "them by hash, so do not rename them.",
+        "",
+    ]
+    dirs = sorted(d for d in RUNTIME_ROOT.glob("*") if d.is_dir()) if RUNTIME_ROOT.exists() else []
+    if not dirs:
+        lines += ["No runs recorded yet.", ""]
+        return "\n".join(lines)
+    lines += [
+        "| protocol_id | model | effort | config | upstream | trials | W/L | excluded |",
+        "|---|---|---|---|---|---:|---:|---:|",
+    ]
+    details: list[str] = []
+    for directory in dirs:
+        runs = sorted(directory.glob("run_*.json"))
+        if not runs:
+            continue
+        identity = _load_json(runs[0]).get("protocol_identity", {})
+        wins = losses = excluded = 0
+        for path in runs:
+            payload = _load_json(path)
+            fatal, _ = _fatal_errors(payload)
+            if fatal:
+                excluded += 1
+            elif payload.get("won"):
+                wins += 1
+            else:
+                losses += 1
+        lines.append(
+            f"| `{directory.name}` | {identity.get('model','?')} | "
+            f"{identity.get('reasoning_effort','?')} | {identity.get('config','?')} | "
+            f"{identity.get('upstream_provider') or 'unpinned'} | {wins + losses} | "
+            f"{wins}/{losses} | {excluded} |"
+        )
+        details += [
+            f"### `{directory.name}`",
+            "",
+            f"- cell: **{identity.get('model')} / {identity.get('reasoning_effort')} / "
+            f"{identity.get('config')}**",
+            f"- upstream pin: {identity.get('upstream_provider') or 'unpinned'}",
+            f"- system prompt sha256: `{str(identity.get('system_prompt_sha256'))[:32]}`",
+            f"- reproduces accepted prompt: {identity.get('reproduces_accepted_prompt')}",
+            f"- turn budget: {identity.get('turns_per_attempt')} x "
+            f"{identity.get('level_attempts')} attempts",
+            f"- valid trials: {wins + losses} ({wins} win / {losses} loss); "
+            f"excluded on infrastructure: {excluded}",
+            "",
+        ]
+    lines += ["", "## Cell detail", ""] + details
+    return "\n".join(lines)
+
+
 def _parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--provider")
     parser.add_argument("--model")
     parser.add_argument("--reasoning-effort", choices=REASONING_EFFORTS)
+    parser.add_argument(
+        "--upstream-provider",
+        help="pin the OpenRouter upstream (e.g. DigitalOcean); recorded in protocol_id",
+    )
     parser.add_argument("--target-n", type=int, default=20)
     parser.add_argument("--config", action="append", choices=PAPER_CONFIGS)
     parser.add_argument("--plan", action="store_true")
+    parser.add_argument("--index", action="store_true",
+                        help="write camera_ready/results/README.md; no model calls")
     parser.add_argument("--smoke", action="store_true")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--max-infrastructure-errors", type=int, default=3)
@@ -280,19 +400,27 @@ def _parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
         parser.error("--target-n must be positive")
     if args.max_infrastructure_errors < 1:
         parser.error("--max-infrastructure-errors must be positive")
-    if not args.smoke and not all((args.provider, args.model, args.reasoning_effort)):
+    if not (args.smoke or args.index) and not all(
+        (args.provider, args.model, args.reasoning_effort)
+    ):
         parser.error("--provider, --model, and --reasoning-effort are required unless --smoke is used")
     return args
 
 
 def main(argv: Iterable[str] | None = None) -> int:
     args = _parse_args(argv)
+    if args.index:
+        RUNTIME_ROOT.mkdir(parents=True, exist_ok=True)
+        target = RUNTIME_ROOT / "README.md"
+        target.write_text(build_index() + "\n")
+        print(f"Wrote {target.relative_to(REPO_ROOT)}")
+        return 0
     if args.smoke:
         report = smoke_report()
         print(json.dumps(report, indent=2, sort_keys=True))
         return 0 if all((
             report["required_environment_files_present"],
-            report["historical_format_only_fallthrough_verified"],
+    
             report["environment_initialised"],
         )) else 1
     configs = args.config or list(PAPER_CONFIGS)
@@ -302,6 +430,7 @@ def main(argv: Iterable[str] | None = None) -> int:
         effort=args.reasoning_effort,
         configs=configs,
         target_n=args.target_n,
+        upstream_provider=args.upstream_provider,
     )
     if args.plan:
         print(json.dumps(plan, indent=2, sort_keys=True))

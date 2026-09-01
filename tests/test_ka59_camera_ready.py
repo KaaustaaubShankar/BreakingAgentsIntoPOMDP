@@ -234,13 +234,45 @@ class CameraReadyRunnerTests(unittest.TestCase):
                         target_n=20,
                     )
 
-    def test_historical_format_only_prompt_is_locked(self) -> None:
+    def test_format_only_control_is_a_distinct_protocol_from_mechanics_hard(self) -> None:
+        """The ported control must never share an identity with the fallthrough."""
         from ka59_game.prompts import build_system_prompt
 
-        self.assertEqual(
+        self.assertNotEqual(
             build_system_prompt("EASY", "HARD_FORMAT_ONLY"),
             build_system_prompt("EASY", "HARD"),
+            "the real format-only control is not present; the ported prompt is missing",
         )
+        hard = runner.protocol_identity(
+            "openrouter", "deepseek/deepseek-v4-pro", "none", "mechanics_hard"
+        )
+        fmt = runner.protocol_identity(
+            "openrouter", "deepseek/deepseek-v4-pro", "none",
+            "mechanics_hard_format_only",
+        )
+        self.assertNotEqual(hard["protocol_id"], fmt["protocol_id"])
+        self.assertTrue(hard["reproduces_accepted_prompt"])
+        self.assertFalse(fmt["reproduces_accepted_prompt"])
+
+    def test_ported_control_inherits_no_historical_trials(self) -> None:
+        """The 20 historical fallthrough trials must not fill the new control."""
+        manifest = audit.build_manifest(20)
+        identity = runner.protocol_identity(
+            "openrouter", "deepseek/deepseek-v4-pro", "none",
+            "mechanics_hard_format_only",
+        )
+        self.assertEqual(runner._accepted_count(manifest, identity), (0, 0, 0))
+
+    def test_upstream_provider_pin_changes_the_protocol_id(self) -> None:
+        unpinned = runner.protocol_identity(
+            "openrouter", "deepseek/deepseek-v4-pro", "none", "baseline"
+        )
+        pinned = runner.protocol_identity(
+            "openrouter", "deepseek/deepseek-v4-pro", "none", "baseline",
+            upstream_provider="DigitalOcean",
+        )
+        self.assertNotEqual(unpinned["protocol_id"], pinned["protocol_id"])
+        self.assertEqual(pinned["upstream_provider"], "DigitalOcean")
 
     def test_provider_failure_aborts_trial_instead_of_scoring_loss(self) -> None:
         from ka59_game.experiment import run_agent
@@ -278,3 +310,83 @@ class CameraReadyRunnerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PromptIdentityPoolingTests(unittest.TestCase):
+    """Pooling must follow the prompt bytes, never the config label."""
+
+    def test_accepted_format_only_trials_ran_the_mechanics_hard_prompt(self):
+        """The pooled cell rests on what the accepted runs sent, not on today's code."""
+        from ka59_game.prompts import build_system_prompt
+
+        fingerprint = audit._system_prompt_fingerprint("mechanics_hard_format_only")
+        self.assertEqual(fingerprint["historical_effective_mechanics"], "HARD")
+        self.assertEqual(
+            fingerprint["system_prompt_sha256"],
+            audit._system_prompt_fingerprint("mechanics_hard")["system_prompt_sha256"],
+        )
+
+    def test_working_tree_divergence_is_recorded_not_silently_pooled(self):
+        """Once the real control exists, new trials under that label are a new protocol."""
+        from ka59_game.prompts import build_system_prompt
+
+        fingerprint = audit._system_prompt_fingerprint("mechanics_hard_format_only")
+        real_control_present = (
+            build_system_prompt("EASY", "HARD_FORMAT_ONLY")
+            != build_system_prompt("EASY", "HARD")
+        )
+        self.assertEqual(fingerprint["current_revision_differs"], real_control_present)
+
+    def test_configs_differing_only_in_world_or_feedback_are_not_pooled(self):
+        groups = audit.prompt_identity_groups()
+        for group in groups["identical_treatment_groups"]:
+            configs = set(group["configs"])
+            self.assertNotIn(
+                "baseline", configs,
+                "baseline shares a system prompt with world_hard/feedback_hard but "
+                "differs in the observation stream; it must never be pooled with them.",
+            )
+
+    def test_pooled_gpt_none_mechanics_reaches_target_without_new_trials(self):
+        manifest = audit.build_manifest(20)
+        pooled = {
+            (cell["model"], cell["reasoning_effort"]): cell
+            for cell in manifest["prompt_identity_pooling"]["pooled_cells"]
+        }
+        cell = pooled[("openai/gpt-5.2", "none")]
+        self.assertEqual(cell["pooled_configs"],
+                         ["mechanics_hard", "mechanics_hard_format_only"])
+        self.assertEqual(cell["infrastructure_clean_scored_n"], 24)
+        self.assertGreaterEqual(cell["infrastructure_clean_scored_n"], 20)
+
+    def test_pooled_components_sum_to_the_pooled_denominator(self):
+        manifest = audit.build_manifest(20)
+        by_cell = {
+            (c["model"], c["reasoning_effort"], c["config"]): c
+            for c in manifest["paper_cells"]
+        }
+        for cell in manifest["prompt_identity_pooling"]["pooled_cells"]:
+            expected = sum(
+                by_cell[(cell["model"], cell["reasoning_effort"], config)][
+                    "infrastructure_clean_scored_n"
+                ]
+                for config in cell["pooled_configs"]
+            )
+            self.assertEqual(cell["infrastructure_clean_scored_n"], expected)
+
+
+class SmokeAndIndexTests(unittest.TestCase):
+    def test_smoke_exits_zero_and_reports_the_active_prompt_regime(self):
+        self.assertEqual(runner.main(["--smoke"]), 0)
+        report = runner.smoke_report()
+        self.assertIn(
+            report["format_only_prompt_regime"],
+            {"historical_fallthrough_to_MECHANICS_HARD",
+             "paper_intended_action_protocol_retained"},
+        )
+
+    def test_index_lists_every_recorded_run_directory(self):
+        text = runner.build_index()
+        for directory in sorted(runner.RUNTIME_ROOT.glob("*")):
+            if directory.is_dir() and list(directory.glob("run_*.json")):
+                self.assertIn(directory.name, text)

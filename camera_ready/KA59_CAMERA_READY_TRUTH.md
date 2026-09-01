@@ -38,6 +38,33 @@ Raw trials do not log an environment Git SHA. The KA59-Simple environment path `
 
 Only DeepSeek none / mechanics-hard differs: the candidate view is 4 wins, 16 losses, N=20 (20%); the strict view is 4 wins, 15 losses, N=19 (21%). This numeric reporting choice is **NEEDS HUMAN DECISION**. Every other cell is identical under the two policies, so the substantive conclusions for those cells do not change.
 
+## Prompt-identity pooling
+
+Config labels are not evidence of distinct treatments. This section fingerprints what each config actually sent in the accepted runs: the world and feedback levels plus the SHA-256 of the system prompt built by `ka59_game/prompts.py:build_system_prompt` at the accepted revision. Configs agreeing on all three delivered an identical treatment and are pooled. `HARD_FORMAT_ONLY` gained a real prompt branch in 412ba5f; every accepted trial predates it and fell through to `MECHANICS_HARD`.
+
+| Config | World | Mechanics (declared) | Mechanics (as run) | Feedback | Accepted prompt SHA-256 | Working tree today |
+|---|---|---|---|---|---|---|
+| baseline | EASY | EASY | EASY | EASY | `76583be4d4087a04` | unchanged |
+| world_hard | HARD | EASY | EASY | EASY | `76583be4d4087a04` | unchanged |
+| mechanics_hard | EASY | HARD | HARD | EASY | `eb97189161a0336b` | unchanged |
+| mechanics_hard_format_only | EASY | HARD_FORMAT_ONLY | HARD | EASY | `eb97189161a0336b` | `fb8866e9d8da1cc2` (differs) |
+| feedback_hard | EASY | EASY | EASY | HARD | `76583be4d4087a04` | unchanged |
+
+**Identical treatment:** `mechanics_hard`, `mechanics_hard_format_only` — declared mechanics levels `HARD`, `HARD_FORMAT_ONLY` resolved to the same prompt `eb97189161a0336b` in the accepted runs, which predate the real control branch. The labels differ; the experiment did not.
+
+Pooled cells follow. These are the defensible denominators for the pooled condition; the component per-label cells above remain as provenance.
+
+| Model | Effort | Pooled configs | Components (infra-clean) | Pooled infra-clean | Pooled strict |
+|---|---|---|---|---|---|
+| deepseek-v4-pro | medium | mechanics_hard, mechanics_hard_format_only | mech=NO SCORED TRIALS; mech_format_only=NO SCORED TRIALS | **NO SCORED TRIALS** | NO STRICT TRIALS |
+| deepseek-v4-pro | none | mechanics_hard, mechanics_hard_format_only | mech=4/20 (20%); mech_format_only=4/20 (20%) | **8/40 (20%)** | 8/39 (21%) |
+| openai/gpt-5.2 | medium | mechanics_hard, mechanics_hard_format_only | mech=NO SCORED TRIALS; mech_format_only=NO SCORED TRIALS | **NO SCORED TRIALS** | NO STRICT TRIALS |
+| openai/gpt-5.2 | none | mechanics_hard, mechanics_hard_format_only | mech=0/5 (0%); mech_format_only=0/19 (0%) | **0/24 (0%)** | 0/24 (0%) |
+
+A pooled cell already at or above the target N needs no further trials. The runner cannot infer this: `protocol_identity` hashes the config *label*, so it plans the component cells separately. Pooling is recorded here, not derived at run time.
+
+Where the working tree column says *differs*, that config no longer reproduces the accepted treatment. New trials under that label are a different protocol and must not be added to the pooled cell above; they need their own identity and their own denominator.
+
 ## Parse-error review
 
 All 49 parse-bearing records now in scope were inspected. Forty-six DeepSeek-medium records explicitly say `DeepSeek returned empty content`; these are provider/infrastructure failures, even where the historical runner later produced actions or a win. The remaining record, `ka59_game/results/deepseek-v4-pro/run_fE_gE_mH_wE_20260613T050257_120144.json`, persisted the nonempty fragment `'{"'` as the failed response at turn 100. It is invalid under the documented JSON-object protocol, so it is a `model_protocol_failure`, not a harness failure. The runner then completed 27 meaningful action events through turn 128 and recorded a normal loss. Two newly recovered GPT no-rules-none trials persist only a `NoneType` parse exception without raw response content; they are `indeterminate` and excluded rather than guessed to be model or harness behavior. No raw evidence supports a definite `harness_parse_failure` classification.

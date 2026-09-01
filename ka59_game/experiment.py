@@ -245,6 +245,7 @@ def run_agent(
     verbose: bool = True,
     llm_client: Optional[LLMClient] = None,
     reasoning_effort: Optional[str] = None,
+    upstream_provider: Optional[str] = None,
     env_id: str = DEFAULT_ENV_ID,
     save: bool = True,
     output_dir: Optional[Path] = None,
@@ -269,7 +270,10 @@ def run_agent(
     )
 
     client = llm_client if llm_client is not None else LLMClient(
-        provider=provider, model=model, reasoning_effort=reasoning_effort
+        provider=provider,
+        model=model,
+        reasoning_effort=reasoning_effort,
+        upstream_provider=upstream_provider,
     )
     system_prompt = build_system_prompt(goal_level, mechanics_level)
 
