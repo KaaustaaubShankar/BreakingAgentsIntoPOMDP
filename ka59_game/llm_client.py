@@ -289,7 +289,15 @@ class LLMClient:
                 # An empty/truncated body is transport flakiness, not a model
                 # answer: retry rather than voiding a trial that has most of its
                 # turns left. The retry may also land on a healthier upstream.
-                retryable = "429" in msg or "empty content" in msg
+                # A quota-exhaustion 429 never succeeds on retry; only rate
+                # limiting is worth backing off for.
+                quota_exhausted = (
+                    "insufficient_quota" in msg or "credit_balance_exhausted" in msg
+                    or "no credits remaining" in msg
+                )
+                retryable = (
+                    ("429" in msg and not quota_exhausted) or "empty content" in msg
+                )
                 if retryable and attempt < 3:
                     time.sleep(10 * (attempt + 1))
                     continue

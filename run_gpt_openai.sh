@@ -19,8 +19,14 @@ MODEL="gpt-5.2"          # direct-API slug; "openai/gpt-5.2" is an invalid model
 TARGET=20
 MAX_INFRA_ERRORS=5
 
-[ -n "${OPENAI_API_KEY:-}" ] || export OPENAI_API_KEY="$(grep -oE '^OPENAI_API_KEY=.*' .env | cut -d= -f2- | tr -d "\"' ")"
-[ -n "${OPENAI_API_KEY}" ] || { echo "no OPENAI_API_KEY in .env" >&2; exit 1; }
+# The OPENAI_API_KEY in ./.env is out of credit (credit_balance_exhausted);
+# the funded key is in bp35/.env. Prefer that one, fall back to the root.
+for src in bp35/.env .env; do
+  [ -f "$src" ] || continue
+  K="$(grep -oE '^OPENAI_API_KEY=.*' "$src" | cut -d= -f2- | tr -d "\"' ")"
+  [ -n "$K" ] && { export OPENAI_API_KEY="$K"; echo "key source: $src"; break; }
+done
+[ -n "${OPENAI_API_KEY:-}" ] || { echo "no OPENAI_API_KEY found" >&2; exit 1; }
 
 cell () {  # $1 = effort, $2 = config
   echo "=== $1 / $2  (target N=$TARGET) ==="
