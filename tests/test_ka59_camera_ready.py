@@ -585,3 +585,39 @@ class RecoveredRawTrialTests(unittest.TestCase):
         for row in summaries.build_summary("openai/gpt-5.2"):
             self.assertEqual(row["run_files_unresolvable_on_disk"], 0, row["config_name"])
             self.assertEqual(row["metrics_from_n_files"], row["n_trials"], row["config_name"])
+
+
+class CleanResultsTreeTests(unittest.TestCase):
+    """results_clean/ must be a faithful, self-contained copy."""
+
+    def setUp(self):
+        from scripts.audit_ka59_camera_ready import REPO_ROOT
+        self.dest = REPO_ROOT / "ka59_game" / "results_clean"
+        if not self.dest.exists():
+            self.skipTest("results_clean/ not built")
+
+    def test_summary_run_files_all_live_inside_the_tree(self):
+        from scripts.audit_ka59_camera_ready import REPO_ROOT
+        for stem in ("gpt_5_2", "deepseek_v4_pro"):
+            rows = json.loads((self.dest / f"ablation_summary_{stem}.json").read_text())
+            for row in rows:
+                for relative in row["run_files"]:
+                    self.assertTrue((REPO_ROOT / relative).exists(), relative)
+                    self.assertTrue(
+                        relative.startswith("ka59_game/results_clean/"), relative
+                    )
+
+    def test_copies_are_byte_identical_to_their_sources(self):
+        import hashlib
+        from scripts.audit_ka59_camera_ready import REPO_ROOT
+        from scripts.build_clean_results_tree import SOURCES
+        for model_dir, globs in SOURCES.items():
+            for pattern in globs:
+                for source in REPO_ROOT.glob(pattern):
+                    copy = self.dest / model_dir / source.name
+                    self.assertTrue(copy.exists(), source.name)
+                    self.assertEqual(
+                        hashlib.sha256(source.read_bytes()).hexdigest(),
+                        hashlib.sha256(copy.read_bytes()).hexdigest(),
+                        source.name,
+                    )
