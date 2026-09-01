@@ -511,3 +511,37 @@ class QuotaVsRateLimitTests(unittest.TestCase):
             with self.assertRaises(Exception):
                 client._generate_openrouter("s", "u")
         self.assertEqual(api.chat.completions.create.call_count, 4)
+
+
+class CameraReadyAblationSummaryTests(unittest.TestCase):
+    """Summaries must be arithmetically consistent with the files they cite."""
+
+    def _rows(self, model):
+        from scripts import build_camera_ready_ablation_summaries as summaries
+        return summaries.build_summary(model)
+
+    def test_file_lists_match_the_reported_counts(self):
+        for model in ("openai/gpt-5.2", "deepseek-v4-pro"):
+            for row in self._rows(model):
+                accepted, new = row["accepted_trials"], row["camera_ready_trials"]
+                self.assertEqual(len(accepted["run_files"]), accepted["n"], row["config_name"])
+                self.assertEqual(
+                    len(new["win_files"]) + len(new["loss_files"]), new["n"], row["config_name"]
+                )
+                self.assertEqual(accepted["n"] + new["n"], row["valid_n"])
+                self.assertEqual(accepted["wins"] + new["wins"], row["wins"])
+                self.assertEqual(row["wins"] + row["losses"], row["valid_n"])
+
+    def test_ported_control_cites_no_historical_files(self):
+        for model in ("openai/gpt-5.2", "deepseek-v4-pro"):
+            row = next(r for r in self._rows(model)
+                       if r["config_name"] == "mechanics_hard_format_only"
+                       and r["reasoning_effort"] == "none")
+            self.assertEqual(row["accepted_trials"]["run_files"], [])
+            self.assertEqual(row["camera_ready_trials"]["n"], 20)
+
+    def test_pooled_mechanics_cell_cites_the_fallthrough_files(self):
+        row = next(r for r in self._rows("deepseek-v4-pro")
+                   if r["config_name"] == "mechanics_hard" and r["reasoning_effort"] == "none")
+        self.assertEqual(row["valid_n"], 40)
+        self.assertEqual(len(row["accepted_trials"]["pooled_from_format_only_fallthrough"]), 20)
