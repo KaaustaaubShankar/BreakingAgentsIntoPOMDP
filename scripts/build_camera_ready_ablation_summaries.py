@@ -191,7 +191,8 @@ def main() -> int:
                         ("deepseek-v4-pro", "deepseek_v4_pro")):
         rows = build_summary(model)
         path = OUT_DIR / f"ablation_summary_{stem}_camera_ready.json"
-        path.write_text(json.dumps(rows, indent=2, sort_keys=True) + "\n")
+        # insertion order matches bp35/results/ablation_summary_*.json; do not sort
+        path.write_text(json.dumps(rows, indent=2) + "\n")
         print(f"Wrote {_display(path)}")
         for row in rows:
             if row["n_trials"]:
