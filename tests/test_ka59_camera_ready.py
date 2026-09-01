@@ -431,3 +431,32 @@ class OpenRouterTransportTests(unittest.TestCase):
     def test_cap_clears_the_measured_per_turn_draw(self):
         from ka59_game.llm_client import OPENROUTER_MAX_TOKENS
         self.assertGreaterEqual(OPENROUTER_MAX_TOKENS, 4 * 10_000)
+
+
+class GptCrossTransportPoolingTests(unittest.TestCase):
+    """GPT-5.2 accepted OpenRouter trials pool into direct-API runs."""
+
+    def test_direct_api_slug_resolves_to_the_accepted_model(self):
+        manifest = audit.build_manifest(20)
+        identity = runner.protocol_identity("openai", "gpt-5.2", "none", "baseline")
+        n, wins, _ = runner._accepted_count(manifest, identity)
+        self.assertEqual((n, wins), (5, 5))
+
+    def test_ported_control_still_inherits_nothing(self):
+        manifest = audit.build_manifest(20)
+        identity = runner.protocol_identity(
+            "openai", "gpt-5.2", "none", "mechanics_hard_format_only"
+        )
+        self.assertEqual(runner._accepted_count(manifest, identity), (0, 0, 0))
+
+    def test_pooled_mechanics_cell_needs_no_new_trials(self):
+        plan = runner.build_plan(provider="openai", model="gpt-5.2", effort="none",
+                                 configs=["mechanics_hard"], target_n=20)
+        self.assertEqual(plan["cells"][0]["current_valid_n"], 24)
+        self.assertEqual(plan["cells"][0]["deficit"], 0)
+
+    def test_cross_transport_decision_is_recorded_with_its_risk(self):
+        manifest = audit.build_manifest(20)
+        entry = manifest["cross_transport_pooling"]["openai/gpt-5.2"]
+        self.assertTrue(entry["disclosure_required_in_paper"])
+        self.assertIn("weaker_than_deepseek_pooling", entry)
