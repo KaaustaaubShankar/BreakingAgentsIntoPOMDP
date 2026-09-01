@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+from ka59_game.llm_client import OPENROUTER_MAX_TOKENS
+
 from scripts.audit_ka59_camera_ready import (
     PAPER_CONFIGS,
     REPO_ROOT,
@@ -291,6 +293,11 @@ def _run(args: argparse.Namespace, plan: dict[str, Any]) -> int:
                 output_dir=output_dir,
                 extra_metadata={
                     "protocol_identity": identity,
+                    # Provenance, deliberately outside protocol_id: the cap is
+                    # not a treatment where it never binds, and hashing it would
+                    # orphan completed cells. Recorded so a binding cap is
+                    # always visible in the raw file.
+                    "generation_max_tokens": OPENROUTER_MAX_TOKENS,
                     "camera_ready_status": fatal or ("win" if result.won else "loss"),
                 },
             )

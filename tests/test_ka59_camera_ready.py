@@ -390,3 +390,44 @@ class SmokeAndIndexTests(unittest.TestCase):
         for directory in sorted(runner.RUNTIME_ROOT.glob("*")):
             if directory.is_dir() and list(directory.glob("run_*.json")):
                 self.assertIn(directory.name, text)
+
+
+class OpenRouterTransportTests(unittest.TestCase):
+    """Truncated bodies must be retried, not allowed to void a whole trial."""
+
+    def _client(self):
+        from ka59_game.llm_client import LLMClient
+        return LLMClient(provider="openrouter", model="m", reasoning_effort="medium",
+                         upstream_provider="DigitalOcean,StreamLake")
+
+    def _response(self, content):
+        msg = mock.Mock(content=content)
+        choice = mock.Mock(message=msg, finish_reason="length" if content is None else "stop")
+        return mock.Mock(choices=[choice], usage=None, provider="StreamLake")
+
+    def test_empty_content_is_retried_and_recovers(self):
+        client = self._client()
+        api = mock.Mock()
+        api.chat.completions.create.side_effect = [
+            self._response(None), self._response(None), self._response('{"action":"MOVE_UP"}')
+        ]
+        with mock.patch.object(type(client), "_openrouter_client", return_value=api), \
+             mock.patch("time.sleep"):
+            out = client._generate_openrouter("sys", "user")
+        self.assertEqual(out, '{"action":"MOVE_UP"}')
+        self.assertEqual(api.chat.completions.create.call_count, 3)
+
+    def test_persistent_empty_content_still_fails_and_names_the_upstream(self):
+        client = self._client()
+        api = mock.Mock()
+        api.chat.completions.create.return_value = self._response(None)
+        with mock.patch.object(type(client), "_openrouter_client", return_value=api), \
+             mock.patch("time.sleep"):
+            with self.assertRaises(ValueError) as ctx:
+                client._generate_openrouter("sys", "user")
+        self.assertIn("StreamLake", str(ctx.exception))
+        self.assertIn("finish_reason=length", str(ctx.exception))
+
+    def test_cap_clears_the_measured_per_turn_draw(self):
+        from ka59_game.llm_client import OPENROUTER_MAX_TOKENS
+        self.assertGreaterEqual(OPENROUTER_MAX_TOKENS, 4 * 10_000)

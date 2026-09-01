@@ -17,6 +17,14 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+# DeepSeek-V4-Pro at medium effort draws 8,000-10,000 output tokens per turn on
+# real KA59 states (measured: 8,101 and 9,934 per turn across two trials). A cap
+# near that mean truncates the tail, and a truncated response returns
+# content=None. Every historical medium failure fits this one mechanism: the
+# direct API at 4,096 lost 81% of turns; OpenRouter at 16,384 lost the tail.
+OPENROUTER_MAX_TOKENS = 65536
+
+
 class LLMClient:
     OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
@@ -251,10 +259,7 @@ class LLMClient:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            # Must clear the reasoning draw. At 1024 a reasoning model spends the
-            # whole budget thinking and returns content=None; that is what voided
-            # the 2026-06 medium sweeps.
-            max_tokens=16384,
+            max_tokens=OPENROUTER_MAX_TOKENS,
         )
         extra_body: Dict[str, Any] = {}
         if self.reasoning_effort:
@@ -272,11 +277,20 @@ class LLMClient:
                 self.last_upstream_provider = getattr(response, "provider", None)
                 content = response.choices[0].message.content
                 if content is None:
-                    raise ValueError("OpenRouter returned empty content.")
+                    served = self.last_upstream_provider or "unknown upstream"
+                    finish = response.choices[0].finish_reason
+                    raise ValueError(
+                        f"OpenRouter returned empty content (upstream={served}, "
+                        f"finish_reason={finish}, cap={OPENROUTER_MAX_TOKENS})."
+                    )
                 return str(content)
             except Exception as exc:
                 msg = str(exc)
-                if "429" in msg and attempt < 3:
+                # An empty/truncated body is transport flakiness, not a model
+                # answer: retry rather than voiding a trial that has most of its
+                # turns left. The retry may also land on a healthier upstream.
+                retryable = "429" in msg or "empty content" in msg
+                if retryable and attempt < 3:
                     time.sleep(10 * (attempt + 1))
                     continue
                 raise
