@@ -17,12 +17,39 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+# DeepSeek-V4-Pro at medium effort draws 8,000-10,000 output tokens per turn on
+# real KA59 states (measured: 8,101 and 9,934 per turn across two trials). A cap
+# near that mean truncates the tail, and a truncated response returns
+# content=None. Every historical medium failure fits this one mechanism: the
+# direct API at 4,096 lost 81% of turns; OpenRouter at 16,384 lost the tail.
+OPENROUTER_MAX_TOKENS = 65536
+
+
 class LLMClient:
     OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
-    def __init__(self, provider: str, model: str) -> None:
+    def __init__(
+        self,
+        provider: str,
+        model: str,
+        reasoning_effort: str | None = None,
+        upstream_provider: str | None = None,
+        upstream_sort: str | None = None,
+    ) -> None:
         self.provider = provider.lower()
         self.model = model
+        self.reasoning_effort = reasoning_effort
+        # OpenRouter routes across many upstreams by default. Pinning one keeps
+        # the served backend a recorded part of the experimental identity.
+        # Accepts one name or a comma-separated allow-list. OpenRouter picks
+        # among the listed upstreams; the served one is recorded per call in
+        # last_upstream_provider so the identity stays auditable.
+        self.upstream_provider = upstream_provider
+        # OpenRouter routing preference among the allowed upstreams, e.g.
+        # "throughput" to pick the fastest. Combined with an allow-list this
+        # keeps provenance bounded while still favouring speed.
+        self.upstream_sort = upstream_sort
+        self.last_upstream_provider: str | None = None
         self.reset_usage()
 
     def reset_usage(self) -> None:
@@ -77,7 +104,13 @@ class LLMClient:
         api_key = os.environ.get("OPENROUTER_API_KEY")
         if not api_key:
             raise ValueError("OPENROUTER_API_KEY not set.")
-        return openai.OpenAI(base_url=self.OPENROUTER_BASE_URL, api_key=api_key)
+        if not hasattr(self, "_or_client"):
+            self._or_client = openai.OpenAI(
+                base_url=self.OPENROUTER_BASE_URL,
+                api_key=api_key,
+                timeout=120.0,
+            )
+        return self._or_client
 
     def _anthropic_client(self):
         import anthropic
@@ -122,14 +155,17 @@ class LLMClient:
         if not api_key:
             raise ValueError("XAI_API_KEY not set.")
         client = _openai.OpenAI(api_key=api_key, base_url="https://api.x.ai/v1")
-        resp = client.chat.completions.create(
+        kwargs: Dict[str, Any] = dict(
             model=self.model,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            max_tokens=1024,
+            max_completion_tokens=4096,
         )
+        if self.reasoning_effort:
+            kwargs["reasoning_effort"] = self.reasoning_effort
+        resp = client.chat.completions.create(**kwargs)
         content = resp.choices[0].message.content
         if content is None:
             raise ValueError("xAI returned empty content.")
@@ -141,18 +177,47 @@ class LLMClient:
         if not api_key:
             raise ValueError("OPENAI_API_KEY not set.")
         client = _openai.OpenAI(api_key=api_key)
-        resp = client.chat.completions.create(
+        # max_completion_tokens covers both reasoning and non-reasoning models;
+        # max_tokens is rejected by gpt-5.x and o-series reasoning models. The
+        # budget must clear the reasoning draw or the model spends it all on
+        # reasoning tokens and returns content=None.
+        kwargs: Dict[str, Any] = dict(
             model=self.model,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            max_tokens=1024,
+            max_completion_tokens=16384,
         )
-        content = resp.choices[0].message.content
-        if content is None:
-            raise ValueError("OpenAI returned empty content.")
-        return str(content)
+        if self.reasoning_effort:
+            kwargs["reasoning_effort"] = self.reasoning_effort
+        # Medium-effort turns can run long; a timeout or an empty body is
+        # transport flakiness, not a model answer, so retry rather than let one
+        # bad turn void a trial with most of its turns left.
+        import time
+        for attempt in range(4):
+            try:
+                resp = client.chat.completions.create(timeout=300.0, **kwargs)
+                content = resp.choices[0].message.content
+                if content is None:
+                    raise ValueError("OpenAI returned empty content.")
+                return str(content)
+            except Exception as exc:
+                msg = str(exc).lower()
+                quota_exhausted = (
+                    "insufficient_quota" in msg or "credit_balance_exhausted" in msg
+                    or "no credits remaining" in msg
+                )
+                retryable = not quota_exhausted and (
+                    "timed out" in msg or "timeout" in msg
+                    or "empty content" in msg
+                    or "429" in msg or "connection" in msg
+                )
+                if retryable and attempt < 3:
+                    time.sleep(5 * (attempt + 1))
+                    continue
+                raise
+        raise RuntimeError("OpenAI call exhausted retries without raising.")
 
     def _generate_claude_cli(self, system_prompt: str, user_prompt: str) -> str:
         """Route through `claude -p` CLI — uses Claude Code OAuth with token refresh.
@@ -215,23 +280,57 @@ class LLMClient:
 
     def _generate_openrouter(self, system_prompt: str, user_prompt: str) -> str:
         import time
+        kwargs: Dict[str, Any] = dict(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            max_tokens=OPENROUTER_MAX_TOKENS,
+        )
+        extra_body: Dict[str, Any] = {}
+        if self.reasoning_effort:
+            extra_body["reasoning"] = {"effort": self.reasoning_effort}
+        provider_pref: Dict[str, Any] = {}
+        if self.upstream_provider:
+            provider_pref["only"] = [
+                p.strip() for p in self.upstream_provider.split(",") if p.strip()
+            ]
+        if self.upstream_sort:
+            provider_pref["sort"] = self.upstream_sort
+        if provider_pref:
+            extra_body["provider"] = provider_pref
+        if extra_body:
+            kwargs["extra_body"] = extra_body
         for attempt in range(4):
             try:
-                response = self._openrouter_client().chat.completions.create(
-                    model=self.model,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                )
+                response = self._openrouter_client().chat.completions.create(**kwargs)
                 self._record_usage(response)
+                self.last_upstream_provider = getattr(response, "provider", None)
                 content = response.choices[0].message.content
                 if content is None:
-                    raise ValueError("OpenRouter returned empty content.")
+                    served = self.last_upstream_provider or "unknown upstream"
+                    finish = response.choices[0].finish_reason
+                    raise ValueError(
+                        f"OpenRouter returned empty content (upstream={served}, "
+                        f"finish_reason={finish}, cap={OPENROUTER_MAX_TOKENS})."
+                    )
                 return str(content)
             except Exception as exc:
                 msg = str(exc)
-                if "429" in msg and attempt < 3:
+                # An empty/truncated body is transport flakiness, not a model
+                # answer: retry rather than voiding a trial that has most of its
+                # turns left. The retry may also land on a healthier upstream.
+                # A quota-exhaustion 429 never succeeds on retry; only rate
+                # limiting is worth backing off for.
+                quota_exhausted = (
+                    "insufficient_quota" in msg or "credit_balance_exhausted" in msg
+                    or "no credits remaining" in msg
+                )
+                retryable = (
+                    ("429" in msg and not quota_exhausted) or "empty content" in msg
+                )
+                if retryable and attempt < 3:
                     time.sleep(10 * (attempt + 1))
                     continue
                 raise
