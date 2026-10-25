@@ -54,7 +54,7 @@ def pct_to_k(pct, n):
 # Raw percentage inputs — converted to counts once, up front.
 _data_pct = {
     "BP35": {
-        "rows": ["GPT-5.6-LUNA (med)", "GPT-5.6-LUNA (none)","GPT-5.2 (med)", "GPT-5.2 (none)", "Deepseek-V4-Pro (med)", "Deepseek-V4-Pro (none)"],
+        "rows": ["GPT-5.6-luna (med)", "GPT-5.6-luna (none)","GPT-5.2 (med)", "GPT-5.2 (none)", "Deepseek-V4-Pro (med)", "Deepseek-V4-Pro (none)"],
         "cols": ["BASELINE", "WORLD_HARD", "MECHANICS_HARD", "FEEDBACK_HARD"],
         "pcts": [
             [100,25,95,100],
@@ -74,7 +74,7 @@ _data_pct = {
         ],
     },
     "LS20": {
-        "rows": ["GPT-5.6-LUNA (med)", "GPT-5.6-LUNA (none)","GPT-5.2 (med)", "GPT-5.2 (none)", "Deepseek-V4-Pro (med)", "Deepseek-V4-Pro (none)"],
+        "rows": ["GPT-5.6-luna (med)", "GPT-5.6-luna (none)","GPT-5.2 (med)", "GPT-5.2 (none)", "Deepseek-V4-Pro (med)", "Deepseek-V4-Pro (none)"],
         "cols": ["BASELINE", "WORLD_HARD", "MECHANICS_HARD", "FEEDBACK_HARD"],
         "pcts": [
             [90,0,0,100],
@@ -94,7 +94,7 @@ _data_pct = {
         ],
     },
     "KA59-Simple": {
-        "rows": ["GPT-5.6-LUNA (med)", "GPT-5.6-LUNA (none)","GPT-5.2 (med)", "GPT-5.2 (none)", "Deepseek-V4-Pro (none)"],
+        "rows": ["GPT-5.6-luna (med)", "GPT-5.6-luna (none)","GPT-5.2 (med)", "GPT-5.2 (none)", "Deepseek-V4-Pro (none)"],
         "cols": ["BASELINE", "WORLD_HARD", "MECHANICS_HARD", "MECHANICS_HARD\n_NORULES", "FEEDBACK_HARD"],
         "pcts": [
             [40, 0, 10, 20, 50], #5.6 med
